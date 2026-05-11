@@ -32,8 +32,8 @@ describe('removeCommand canonical protection', () => {
     // Setup two agents that use different dirs
     // Claude uses .claude/skills
     await mkdir(join(tempDir, '.claude/skills'), { recursive: true });
-    // Continue uses .continue/skills
-    await mkdir(join(tempDir, '.continue/skills'), { recursive: true });
+    // Pi uses .pi/skills
+    await mkdir(join(tempDir, '.pi/skills'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -45,26 +45,26 @@ describe('removeCommand canonical protection', () => {
     const skillName = 'test-skill';
     const canonicalPath = join(tempDir, '.agents/skills', skillName);
     const claudePath = join(tempDir, '.claude/skills', skillName);
-    const continuePath = join(tempDir, '.continue/skills', skillName);
+    const piPath = join(tempDir, '.pi/skills', skillName);
 
     // 1. Create canonical storage
     await mkdir(canonicalPath, { recursive: true });
     await writeFile(join(canonicalPath, 'SKILL.md'), '# Test');
 
-    // 2. Install (symlink) to Claude and Continue
+    // 2. Install (symlink) to Claude and Pi
     await symlink(canonicalPath, claudePath, 'junction');
-    await symlink(canonicalPath, continuePath, 'junction');
+    await symlink(canonicalPath, piPath, 'junction');
 
     // Verify setup
     expect(
       (await lstat(claudePath)).isSymbolicLink() || (await lstat(claudePath)).isDirectory()
     ).toBe(true);
-    expect(
-      (await lstat(continuePath)).isSymbolicLink() || (await lstat(continuePath)).isDirectory()
-    ).toBe(true);
+    expect((await lstat(piPath)).isSymbolicLink() || (await lstat(piPath)).isDirectory()).toBe(
+      true
+    );
 
-    // Mock agents: Claude and Continue are installed
-    vi.mocked(agentsModule.detectInstalledAgents).mockResolvedValue(['claude-code', 'continue']);
+    // Mock agents: Claude and Pi are installed
+    vi.mocked(agentsModule.detectInstalledAgents).mockResolvedValue(['claude-code', 'pi']);
 
     // 3. Remove from Claude only
     // -a claude-code
@@ -74,13 +74,13 @@ describe('removeCommand canonical protection', () => {
     // Claude path should be gone
     await expect(lstat(claudePath)).rejects.toThrow();
 
-    // Canonical path SHOULD STILL EXIST because Continue uses it
+    // Canonical path SHOULD STILL EXIST because Pi uses it
     expect((await lstat(canonicalPath)).isDirectory()).toBe(true);
 
-    // Continue path should still be valid
-    expect(
-      (await lstat(continuePath)).isSymbolicLink() || (await lstat(continuePath)).isDirectory()
-    ).toBe(true);
+    // Pi path should still be valid
+    expect((await lstat(piPath)).isSymbolicLink() || (await lstat(piPath)).isDirectory()).toBe(
+      true
+    );
   });
 
   it('should remove canonical storage if NO other agents are using it', async () => {

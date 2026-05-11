@@ -1,4 +1,3 @@
-import { access, constants } from 'fs/promises';
 import type { AgentType } from './types.ts';
 
 type AgentResult =
@@ -22,12 +21,8 @@ const agentNameToType: Record<string, AgentType> = {
   'cursor-cli': 'cursor',
   claude: 'claude-code',
   cowork: 'claude-code',
-  devin: 'universal', // Devin not in agentart-cli agent list, use universal
-  replit: 'replit',
   gemini: 'gemini-cli',
   codex: 'codex',
-  antigravity: 'antigravity',
-  'augment-cli': 'augment',
   opencode: 'opencode',
   'github-copilot': 'github-copilot',
 };
@@ -49,8 +44,6 @@ async function determineAgent(): Promise<AgentResult> {
   if (process.env.CODEX_SANDBOX || process.env.CODEX_CI || process.env.CODEX_THREAD_ID) {
     return { isAgent: true, agent: { name: 'codex' } };
   }
-  if (process.env.ANTIGRAVITY_AGENT) return { isAgent: true, agent: { name: 'antigravity' } };
-  if (process.env.AUGMENT_AGENT) return { isAgent: true, agent: { name: 'augment-cli' } };
   if (process.env.OPENCODE_CLIENT) return { isAgent: true, agent: { name: 'opencode' } };
   if (process.env.CLAUDECODE || process.env.CLAUDE_CODE) {
     return {
@@ -58,7 +51,6 @@ async function determineAgent(): Promise<AgentResult> {
       agent: { name: process.env.CLAUDE_CODE_IS_COWORK ? 'cowork' : 'claude' },
     };
   }
-  if (process.env.REPL_ID) return { isAgent: true, agent: { name: 'replit' } };
   if (
     process.env.COPILOT_MODEL ||
     process.env.COPILOT_ALLOW_ALL ||
@@ -67,12 +59,7 @@ async function determineAgent(): Promise<AgentResult> {
     return { isAgent: true, agent: { name: 'github-copilot' } };
   }
 
-  try {
-    await access('/opt/.devin', constants.F_OK);
-    return { isAgent: true, agent: { name: 'devin' } };
-  } catch {
-    return { isAgent: false, agent: undefined };
-  }
+  return { isAgent: false, agent: undefined };
 }
 
 /**

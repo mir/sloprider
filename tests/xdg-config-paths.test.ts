@@ -2,7 +2,7 @@
  * Tests for XDG config path handling (cross-platform).
  *
  * These tests verify that agents using XDG Base Directory specification
- * (OpenCode, Amp, Goose) use ~/.config paths consistently across all platforms,
+ * (OpenCode) use ~/.config paths consistently across all platforms,
  * NOT platform-specific paths like ~/Library/Preferences on macOS.
  *
  * This is critical because OpenCode follows XDG_CONFIG_HOME and falls back to
@@ -34,32 +34,6 @@ describe('XDG config paths', () => {
     });
   });
 
-  describe('Amp', () => {
-    it('uses ~/.config/agents/skills for global skills', () => {
-      const expected = join(home, '.config', 'agents', 'skills');
-      expect(agents.amp.globalSkillsDir).toBe(expected);
-    });
-
-    it('does NOT use platform-specific paths', () => {
-      expect(agents.amp.globalSkillsDir).not.toContain('Library');
-      expect(agents.amp.globalSkillsDir).not.toContain('Preferences');
-      expect(agents.amp.globalSkillsDir).not.toContain('AppData');
-    });
-  });
-
-  describe('Goose', () => {
-    it('uses ~/.config/goose/skills for global skills', () => {
-      const expected = join(home, '.config', 'goose', 'skills');
-      expect(agents.goose.globalSkillsDir).toBe(expected);
-    });
-
-    it('does NOT use platform-specific paths', () => {
-      expect(agents.goose.globalSkillsDir).not.toContain('Library');
-      expect(agents.goose.globalSkillsDir).not.toContain('Preferences');
-      expect(agents.goose.globalSkillsDir).not.toContain('AppData');
-    });
-  });
-
   describe('skill lock file path', () => {
     function getSkillLockPath(xdgStateHome: string | undefined, homeDir: string): string {
       if (xdgStateHome) {
@@ -85,9 +59,9 @@ describe('XDG config paths', () => {
       expect(agents.cursor.globalSkillsDir).toBe(expected);
     });
 
-    it('cline uses ~/.agents/skills (home-based, not XDG)', () => {
-      const expected = join(home, '.agents', 'skills');
-      expect(agents.cline.globalSkillsDir).toBe(expected);
+    it('pi uses ~/.pi/agent/skills (home-based, not XDG)', () => {
+      const expected = join(home, '.pi', 'agent', 'skills');
+      expect(agents.pi.globalSkillsDir).toBe(expected);
     });
   });
 });

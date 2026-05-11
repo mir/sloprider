@@ -10,9 +10,9 @@ const README_PATH = join(ROOT, 'README.md');
 const PACKAGE_PATH = join(ROOT, 'package.json');
 
 function generateAgentList(): string {
-  const agentList = Object.values(agents);
-  const count = agentList.length;
-  return `Supports **OpenCode**, **Claude Code**, **Codex**, **Cursor**, and [${count - 4} more](#supported-agents).`;
+  const agentList = Object.values(agents).map((agent) => `**${agent.displayName}**`);
+  const last = agentList.pop();
+  return `Supports ${agentList.join(', ')}, and ${last}.`;
 }
 
 function generateAgentNames(): string {
@@ -71,6 +71,8 @@ function generateSkillDiscoveryPaths(): string {
   ];
 
   const agentPaths = [...new Set(Object.values(agents).map((a) => a.skillsDir))]
+    .concat(['.codex/skills', '.github/skills', '.opencode/skills'])
+    .filter((p, index, all) => all.indexOf(p) === index)
     .filter((p) => p !== 'skills') // Filter out the standard `skills/` path
     .map((p) => `- \`${p}/\``);
 

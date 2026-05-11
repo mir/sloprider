@@ -258,9 +258,9 @@ async function selectAgentsInteractive(options: {
   const universalAgents = getUniversalAgents().filter(supportsGlobalFilter);
   const otherAgents = getNonUniversalAgents().filter(supportsGlobalFilter);
 
-  // Universal agents shown as locked section
+  // Shared .agents/skills agents are shown as a locked section
   const universalSection = {
-    title: 'Universal (.agents/skills)',
+    title: 'Shared (.agents/skills)',
     items: universalAgents.map((a) => ({
       value: a,
       label: agents[a].displayName,
@@ -316,7 +316,6 @@ export interface AddOptions {
   all?: boolean;
   fullDepth?: boolean;
   copy?: boolean;
-  dangerouslyAcceptOpenclawRisks?: boolean;
 }
 
 /**
@@ -833,27 +832,6 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     spinner.stop(
       `Source: ${parsed.type === 'local' ? parsed.localPath! : parsed.url}${parsed.ref ? ` @ ${pc.yellow(parsed.ref)}` : ''}${parsed.subpath ? ` (${parsed.subpath})` : ''}${parsed.skillFilter ? ` ${pc.dim('@')}${pc.cyan(parsed.skillFilter)}` : ''}`
     );
-
-    const ownerRepoRaw = getOwnerRepo(parsed);
-
-    // Block openclaw sources unless explicitly opted in
-    const sourceOwner = ownerRepoRaw?.split('/')[0]?.toLowerCase();
-    if (sourceOwner === 'openclaw' && !options.dangerouslyAcceptOpenclawRisks) {
-      console.log();
-      p.log.warn(pc.yellow(pc.bold('⚠ OpenClaw skills are unverified community submissions.')));
-      p.log.message(
-        pc.yellow(
-          'This source contains user-submitted skills that have not been reviewed for safety or quality.'
-        )
-      );
-      p.log.message(pc.yellow('Skills run with full agent permissions and could be malicious.'));
-      console.log();
-      p.log.message(
-        `If you understand the risks, re-run with:\n\n  ${pc.cyan(`agentart add ${source} --dangerously-accept-openclaw-risks`)}\n`
-      );
-      p.outro(pc.red('Installation blocked'));
-      process.exit(1);
-    }
 
     // Handle well-known skills from arbitrary URLs
     if (parsed.type === 'well-known') {
@@ -1658,11 +1636,10 @@ async function promptForFindSkills(
     }
 
     if (install) {
-      // Install find-skills to the same agents the user selected, excluding replit
+      // Install find-skills to the same agents the user selected.
       await dismissPrompt('findSkillsPrompt');
 
-      // Filter out replit from target agents
-      const findSkillsAgents = targetAgents?.filter((a) => a !== 'replit');
+      const findSkillsAgents = targetAgents;
 
       // Skip if no valid agents remain after filtering
       if (!findSkillsAgents || findSkillsAgents.length === 0) {
@@ -1736,8 +1713,6 @@ export function parseAddOptions(args: string[]): { source: string[]; options: Ad
       options.fullDepth = true;
     } else if (arg === '--copy') {
       options.copy = true;
-    } else if (arg === '--dangerously-accept-openclaw-risks') {
-      options.dangerouslyAcceptOpenclawRisks = true;
     } else if (arg && !arg.startsWith('-')) {
       source.push(arg);
     }

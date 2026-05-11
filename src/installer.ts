@@ -307,7 +307,7 @@ export async function installSkillForAgent(
 
     // For project-level installs, skip creating symlinks for non-universal agents
     // whose config directory doesn't already exist in the project. This prevents
-    // creating directories like .windsurf/, .kiro/, etc. when those agents aren't
+    // creating directories like .claude/ or .pi/ when those agents aren't
     // actually used in this project. The skill is already available in .agents/skills/.
     if (!isGlobal && !isUniversalAgent(agentType)) {
       const agentRootDir = join(cwd, agents[agentType].skillsDir.split('/')[0]!);
@@ -936,8 +936,8 @@ export async function listInstalledSkills(
 
     // Also scan skill directories for agents NOT in agentsToCheck, in case
     // skills were installed with `--agent <name>` but the agent is no longer
-    // detected (e.g. ~/.openclaw was removed).  Only add dirs that actually
-    // exist on disk to avoid unnecessary readdir errors.
+    // detected. Only add dirs that actually exist on disk to avoid unnecessary
+    // readdir errors.
     const allAgentTypes = Object.keys(agents) as AgentType[];
     for (const agentType of allAgentTypes) {
       if (agentsToCheck.includes(agentType)) continue;

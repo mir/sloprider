@@ -85,9 +85,9 @@ This is a test skill.
       createSymlink('skill-one', claudeSkillsDir);
       createSymlink('skill-two', claudeSkillsDir);
 
-      const clineSkillsDir = createAgentSkillsDir('.cline');
-      createSymlink('skill-one', clineSkillsDir);
-      createSymlink('skill-three', clineSkillsDir);
+      const piSkillsDir = createAgentSkillsDir('.pi');
+      createSymlink('skill-one', piSkillsDir);
+      createSymlink('skill-three', piSkillsDir);
     });
 
     it('should remove specific skill by name with -y flag', () => {
@@ -172,7 +172,7 @@ This is a test skill.
     beforeEach(() => {
       createTestSkill('test-skill');
       createAgentSkillsDir('.claude');
-      createAgentSkillsDir('.cline');
+      createAgentSkillsDir('.pi');
     });
 
     it('should show error for invalid agent name', () => {

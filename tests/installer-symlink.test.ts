@@ -38,7 +38,7 @@ describe('installer symlink regression', () => {
     try {
       const result = await installSkillForAgent(
         { name: skillName, description: 'test', path: skillDir },
-        'amp',
+        'cursor',
         { cwd: projectDir, mode: 'symlink', global: false }
       );
 
@@ -74,7 +74,7 @@ describe('installer symlink regression', () => {
 
       const result = await installSkillForAgent(
         { name: skillName, description: 'test', path: skillDir },
-        'amp',
+        'cursor',
         { cwd: projectDir, mode: 'symlink', global: false }
       );
 

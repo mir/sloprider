@@ -247,7 +247,7 @@ export async function runSync(args: string[], options: SyncOptions = {}): Promis
     if (installedAgents.length === 0) {
       if (options.yes) {
         targetAgents = universalAgents;
-        p.log.info('Installing to universal agents');
+        p.log.info('Installing to shared .agents/skills agents');
       } else {
         const otherAgents = getNonUniversalAgents();
 
@@ -262,7 +262,7 @@ export async function runSync(args: string[], options: SyncOptions = {}): Promis
           items: otherChoices,
           initialSelected: [],
           lockedSection: {
-            title: 'Universal (.agents/skills)',
+            title: 'Shared (.agents/skills)',
             items: universalAgents.map((a) => ({
               value: a,
               label: agents[a].displayName,
@@ -299,7 +299,7 @@ export async function runSync(args: string[], options: SyncOptions = {}): Promis
         items: otherChoices,
         initialSelected: installedAgents.filter((a) => !universalAgents.includes(a)),
         lockedSection: {
-          title: 'Universal (.agents/skills)',
+          title: 'Shared (.agents/skills)',
           items: universalAgents.map((a) => ({
             value: a,
             label: agents[a].displayName,

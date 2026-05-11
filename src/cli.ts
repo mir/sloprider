@@ -755,7 +755,7 @@ async function updateProjectSkills(
   }
 
   const targetParts: string[] = [];
-  if (hasUniversal) targetParts.push('Universal');
+  if (hasUniversal) targetParts.push('Shared .agents/skills');
   targetParts.push(...targetAgentNames);
 
   if (targetParts.length > 0) {
