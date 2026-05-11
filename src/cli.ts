@@ -12,6 +12,7 @@ import { runList } from './list.ts';
 import { removeCommand, parseRemoveOptions } from './remove.ts';
 import { sanitizeMetadata } from './sanitize.ts';
 import { runSync, parseSyncOptions } from './sync.ts';
+import { runMcp, showMcpHelp } from './mcp.ts';
 import { isRunningInAgent } from './detect-agent.ts';
 import { agents, isUniversalAgent } from './agents.ts';
 import type { AgentType } from './types.ts';
@@ -80,6 +81,9 @@ function showBanner(): void {
   console.log(
     `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} update${RESET}               ${DIM}Update installed skills${RESET}`
   );
+  console.log(
+    `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} mcp${RESET}                  ${DIM}Manage MCP servers${RESET}`
+  );
   console.log();
   console.log(
     `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} experimental_install${RESET} ${DIM}Restore from agentart-lock.json${RESET}`
@@ -111,6 +115,7 @@ ${BOLD}Manage Skills:${RESET}
 
 ${BOLD}Updates:${RESET}
   update [skills...]   Update skills to latest versions (alias: upgrade)
+  mcp <command>        Manage MCP servers for supported agents
 
 ${BOLD}Update Options:${RESET}
   -g, --global           Update global skills only
@@ -121,6 +126,13 @@ ${BOLD}Project:${RESET}
   experimental_install Restore skills from agentart-lock.json
   init [name]          Initialize a skill (creates <name>/SKILL.md or ./SKILL.md)
   experimental_sync    Sync skills from node_modules into agent directories
+
+${BOLD}MCP:${RESET}
+  mcp add <name> -- <command> [args...]   Add a stdio MCP server
+  mcp add <name> --url <url>              Add a remote MCP server
+  mcp list, mcp ls                        List configured MCP servers
+  mcp remove <servers...>                 Remove MCP servers
+  mcp install                             Restore MCP servers from lock
 
 ${BOLD}Add Options:${RESET}
   -g, --global           Install skill globally (user-level) instead of project-level
@@ -169,6 +181,8 @@ ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} agentart update
   ${DIM}$${RESET} agentart update my-skill             ${DIM}# update a single skill${RESET}
   ${DIM}$${RESET} agentart update -g                    ${DIM}# update global skills only${RESET}
+  ${DIM}$${RESET} agentart mcp add context7 -- npx -y @upstash/context7-mcp
+  ${DIM}$${RESET} agentart mcp list
   ${DIM}$${RESET} agentart experimental_install            ${DIM}# restore from agentart-lock.json${RESET}
   ${DIM}$${RESET} agentart init my-skill
   ${DIM}$${RESET} agentart experimental_sync              ${DIM}# sync from node_modules${RESET}
@@ -933,6 +947,9 @@ async function main(): Promise<void> {
       await runSync(restArgs, syncOptions);
       break;
     }
+    case 'mcp':
+      await runMcp(restArgs);
+      break;
     case 'list':
     case 'ls':
       await runList(restArgs);
@@ -945,6 +962,9 @@ async function main(): Promise<void> {
     case '--help':
     case '-h':
       showHelp();
+      break;
+    case 'mcp-help':
+      showMcpHelp();
       break;
     case '--version':
     case '-v':
