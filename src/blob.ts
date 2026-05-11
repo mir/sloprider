@@ -13,6 +13,8 @@
 import { isRecord, parseFrontmatter } from './frontmatter.ts';
 import { sanitizeMetadata } from './sanitize.ts';
 import type { Skill } from './types.ts';
+import { DEFAULT_REPO_SCAN_MAX_DEPTH } from './repo-scan.ts';
+import { SKILL_PRIORITY_DIRS } from './skills.ts';
 
 // ─── Types ───
 
@@ -148,20 +150,14 @@ export function getSkillFolderHashFromTree(tree: RepoTree, skillPath: string): s
 
 // ─── Skill discovery from tree ───
 
-/** Known directories where SKILL.md files are commonly found (relative to repo root) */
-const PRIORITY_PREFIXES = [
-  '',
-  'skills/',
-  'skills/.curated/',
-  'skills/.experimental/',
-  'skills/.system/',
-  '.agents/skills/',
-  '.claude/skills/',
-  '.codex/skills/',
-  '.github/skills/',
-  '.opencode/skills/',
-  '.pi/skills/',
-];
+const TREE_SKIP_DIRS = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '__pycache__',
+]);
 
 /**
  * Find all SKILL.md file paths in a repo tree.
@@ -169,57 +165,50 @@ const PRIORITY_PREFIXES = [
  * If subpath is set, only searches within that subtree.
  */
 export function findSkillMdPaths(tree: RepoTree, subpath?: string): string[] {
-  // Find all blob entries that are SKILL.md files (case-insensitive)
+  const normalizedSubpath = subpath?.replace(/^\/+|\/+$/g, '');
+
+  if (normalizedSubpath) {
+    const directPath = `${normalizedSubpath}/SKILL.md`;
+    if (tree.tree.some((e) => e.type === 'blob' && e.path === directPath)) {
+      return [directPath];
+    }
+  }
+
   const allSkillMds = tree.tree
-    .filter((e) => e.type === 'blob' && e.path.toLowerCase().endsWith('skill.md'))
+    .filter((e) => {
+      if (e.type !== 'blob') return false;
+      const parts = e.path.split('/');
+      if (parts.at(-1) !== 'SKILL.md') return false;
+      if (parts.slice(0, -1).some((part) => TREE_SKIP_DIRS.has(part))) return false;
+      return parts.length - 1 <= DEFAULT_REPO_SCAN_MAX_DEPTH;
+    })
     .map((e) => e.path);
 
-  // Apply subpath filter
-  const prefix = subpath ? (subpath.endsWith('/') ? subpath : subpath + '/') : '';
-  const filtered = prefix
-    ? allSkillMds.filter((p) => p.startsWith(prefix) || p === prefix + 'SKILL.md')
+  const prefix = normalizedSubpath ? normalizedSubpath + '/' : '';
+  const filtered = normalizedSubpath
+    ? allSkillMds.filter((p) => p.startsWith(prefix))
     : allSkillMds;
 
   if (filtered.length === 0) return [];
 
-  // Check priority directories first (same order as discoverSkills)
-  const priorityResults: string[] = [];
-  const seen = new Set<string>();
-
-  for (const priorityPrefix of PRIORITY_PREFIXES) {
-    const fullPrefix = prefix + priorityPrefix;
-    for (const skillMd of filtered) {
-      // Check if this SKILL.md is directly inside the priority dir (one level deep)
-      if (!skillMd.startsWith(fullPrefix)) continue;
-      const rest = skillMd.slice(fullPrefix.length);
-
-      // Direct SKILL.md in the priority dir (e.g., "skills/SKILL.md")
-      if (rest.toLowerCase() === 'skill.md') {
-        if (!seen.has(skillMd)) {
-          priorityResults.push(skillMd);
-          seen.add(skillMd);
-        }
-        continue;
-      }
-
-      // SKILL.md one level deep (e.g., "skills/react-best-practices/SKILL.md")
-      const parts = rest.split('/');
-      if (parts.length === 2 && parts[1]!.toLowerCase() === 'skill.md') {
-        if (!seen.has(skillMd)) {
-          priorityResults.push(skillMd);
-          seen.add(skillMd);
-        }
+  const rank = (path: string) => {
+    const relativePath = normalizedSubpath ? path.slice(prefix.length) : path;
+    const skillDir = relativePath === 'SKILL.md' ? '' : relativePath.slice(0, -'/SKILL.md'.length);
+    for (let i = 0; i < SKILL_PRIORITY_DIRS.length; i++) {
+      const priority = SKILL_PRIORITY_DIRS[i]!;
+      if (priority === '') {
+        if (skillDir === '') return i;
+      } else if (skillDir === priority || skillDir.startsWith(priority + '/')) {
+        return i;
       }
     }
-  }
+    return SKILL_PRIORITY_DIRS.length;
+  };
 
-  // If we found skills in priority dirs, return those
-  if (priorityResults.length > 0) return priorityResults;
-
-  // Fallback: return all SKILL.md files found (limited to 5 levels deep)
-  return filtered.filter((p) => {
-    const depth = p.split('/').length;
-    return depth <= 6; // 5 levels + the SKILL.md file itself
+  return filtered.sort((a, b) => {
+    const rankDiff = rank(a) - rank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return a.localeCompare(b);
   });
 }
 

@@ -7,6 +7,7 @@ import {
   listMcpServersForAgent,
   removeMcpServerForAgent,
 } from '../src/mcp-config.ts';
+import { discoverMcpServers } from '../src/mcp-discovery.ts';
 import { parseMcpAddArgs } from '../src/mcp.ts';
 
 async function withTempDir(fn: (dir: string) => Promise<void>) {
@@ -125,6 +126,91 @@ describe('MCP config', () => {
       expect(afterRemove).toContain('model = "gpt-5"');
       expect(afterRemove).toContain('[mcp_servers.old]');
       expect(afterRemove).not.toContain('[mcp_servers."context7"]');
+    });
+  });
+
+  it('discovers MCP servers from supported project config files', async () => {
+    await withTempDir(async (cwd) => {
+      await writeFile(
+        join(cwd, '.mcp.json'),
+        JSON.stringify({ mcpServers: { claude: { command: 'node', args: ['server.js'] } } })
+      );
+
+      await writeFile(
+        join(cwd, 'agentart-mcp-lock.json'),
+        JSON.stringify({
+          version: 1,
+          mcps: { locked: { server: { command: 'npx', args: ['locked'] } } },
+        })
+      );
+
+      await writeFile(
+        join(cwd, 'opencode.jsonc'),
+        `{
+          // jsonc is accepted
+          "mcp": { "open": { "url": "https://example.com/mcp" } },
+        }`
+      );
+
+      await mkdir(join(cwd, '.cursor'), { recursive: true });
+      await writeFile(
+        join(cwd, '.cursor/mcp.json'),
+        JSON.stringify({ mcpServers: { cursor: { command: 'cursor-mcp' } } })
+      );
+
+      await mkdir(join(cwd, '.vscode'), { recursive: true });
+      await writeFile(
+        join(cwd, '.vscode/mcp.json'),
+        JSON.stringify({ servers: { vscode: { command: 'vscode-mcp' } } })
+      );
+
+      await mkdir(join(cwd, '.gemini'), { recursive: true });
+      await writeFile(
+        join(cwd, '.gemini/settings.json'),
+        JSON.stringify({ mcpServers: { gemini: { command: 'gemini-mcp' } } })
+      );
+
+      await mkdir(join(cwd, '.codex'), { recursive: true });
+      await writeFile(
+        join(cwd, '.codex/config.toml'),
+        '[mcp_servers.codex]\ncommand = "codex-mcp"\n'
+      );
+
+      await mkdir(join(cwd, '.claude-plugin'), { recursive: true });
+      await writeFile(
+        join(cwd, '.claude-plugin/plugin.json'),
+        JSON.stringify({ mcpServers: { plugin: { command: 'plugin-mcp' } } })
+      );
+
+      const discovered = await discoverMcpServers(cwd);
+      expect(discovered.map((server) => server.name).sort()).toEqual([
+        'claude',
+        'codex',
+        'cursor',
+        'gemini',
+        'locked',
+        'open',
+        'plugin',
+        'vscode',
+      ]);
+    });
+  });
+
+  it('does not treat Claude or OpenCode settings.json as MCP definition files', async () => {
+    await withTempDir(async (cwd) => {
+      await mkdir(join(cwd, '.claude'), { recursive: true });
+      await writeFile(
+        join(cwd, '.claude/settings.json'),
+        JSON.stringify({ mcpServers: { claudeSettings: { command: 'bad' } } })
+      );
+
+      await mkdir(join(cwd, '.opencode'), { recursive: true });
+      await writeFile(
+        join(cwd, '.opencode/settings.json'),
+        JSON.stringify({ mcp: { opencodeSettings: { command: 'bad' } } })
+      );
+
+      expect(await discoverMcpServers(cwd)).toEqual([]);
     });
   });
 });

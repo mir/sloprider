@@ -10,7 +10,12 @@ import { searchMultiselect } from './prompts/search-multiselect.ts';
 const isCancelled = (value: unknown): value is symbol => typeof value === 'symbol';
 
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
-import { discoverSkills, getSkillDisplayName, filterSkills } from './skills.ts';
+import {
+  discoverSkills,
+  getSkillDisplayName,
+  filterSkills,
+  getDuplicateSkillNameGroups,
+} from './skills.ts';
 import {
   installSkillForAgent,
   installBlobSkillForAgent,
@@ -46,6 +51,7 @@ import {
   type BlobSkill,
   type BlobInstallResult,
 } from './blob.ts';
+import { discoverMcpServers, type DiscoveredMcpServer } from './mcp-discovery.ts';
 
 /**
  * Shortens a path for display: replaces homedir with ~ and cwd with .
@@ -853,6 +859,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     const includeInternal = !!(options.skill && options.skill.length > 0);
 
     let skills: Skill[];
+    let discoveredMcps: DiscoveredMcpServer[] = [];
     let blobResult: BlobInstallResult | null = null;
 
     if (parsed.type === 'local') {
@@ -870,7 +877,10 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         includeInternal,
         fullDepth: options.fullDepth,
       });
-    } else if (parsed.type === 'github' && !options.fullDepth) {
+      discoveredMcps = await discoverMcpServers(
+        parsed.subpath ? join(parsed.localPath!, parsed.subpath) : parsed.localPath!
+      );
+    } else if (parsed.type === 'github' && !options.fullDepth && !options.list) {
       // Try blob-based fast install for GitHub sources
       // Only enabled for allowlisted orgs; skip for --full-depth
       const BLOB_ALLOWED_OWNERS = ['vercel', 'vercel-labs', 'heygen-com'];
@@ -905,6 +915,9 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
           includeInternal,
           fullDepth: options.fullDepth,
         });
+        discoveredMcps = await discoverMcpServers(
+          parsed.subpath ? join(tempDir, parsed.subpath) : tempDir
+        );
       }
     } else {
       // GitLab, git URL, or --full-depth: always clone
@@ -917,9 +930,12 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         includeInternal,
         fullDepth: options.fullDepth,
       });
+      discoveredMcps = await discoverMcpServers(
+        parsed.subpath ? join(tempDir, parsed.subpath) : tempDir
+      );
     }
 
-    if (skills.length === 0) {
+    if (skills.length === 0 && (!options.list || discoveredMcps.length === 0)) {
       spinner.stop(pc.red('No skills found'));
       p.outro(
         pc.red('No valid skills found. Skills require a SKILL.md with name and description.')
@@ -934,45 +950,62 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
 
     if (options.list) {
       console.log();
-      p.log.step(pc.bold('Available Skills'));
+      if (skills.length > 0) {
+        p.log.step(pc.bold('Available Skills'));
 
-      // Group available skills by plugin for list output
-      const groupedSkills: Record<string, Skill[]> = {};
-      const ungroupedSkills: Skill[] = [];
+        // Group available skills by plugin for list output
+        const groupedSkills: Record<string, Skill[]> = {};
+        const ungroupedSkills: Skill[] = [];
 
-      for (const skill of skills) {
-        if (skill.pluginName) {
-          const group = skill.pluginName;
-          if (!groupedSkills[group]) groupedSkills[group] = [];
-          groupedSkills[group].push(skill);
-        } else {
-          ungroupedSkills.push(skill);
+        for (const skill of skills) {
+          if (skill.pluginName) {
+            const group = skill.pluginName;
+            if (!groupedSkills[group]) groupedSkills[group] = [];
+            groupedSkills[group].push(skill);
+          } else {
+            ungroupedSkills.push(skill);
+          }
+        }
+
+        // Print groups
+        const sortedGroups = Object.keys(groupedSkills).sort();
+        for (const group of sortedGroups) {
+          // Convert kebab-case to Title Case for display header
+          const title = group
+            .split('-')
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+
+          console.log(pc.bold(title));
+          for (const skill of groupedSkills[group]!) {
+            p.log.message(`  ${pc.cyan(getSkillDisplayName(skill))}`);
+            p.log.message(`    ${pc.dim(skill.description)}`);
+            p.log.message(`    ${pc.dim(shortenPath(skill.path, process.cwd()))}`);
+          }
+          console.log();
+        }
+
+        // Print ungrouped
+        if (ungroupedSkills.length > 0) {
+          if (sortedGroups.length > 0) console.log(pc.bold('General'));
+          for (const skill of ungroupedSkills) {
+            p.log.message(`  ${pc.cyan(getSkillDisplayName(skill))}`);
+            p.log.message(`    ${pc.dim(skill.description)}`);
+            if (skill.path) p.log.message(`    ${pc.dim(shortenPath(skill.path, process.cwd()))}`);
+          }
         }
       }
 
-      // Print groups
-      const sortedGroups = Object.keys(groupedSkills).sort();
-      for (const group of sortedGroups) {
-        // Convert kebab-case to Title Case for display header
-        const title = group
-          .split('-')
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-
-        console.log(pc.bold(title));
-        for (const skill of groupedSkills[group]!) {
-          p.log.message(`  ${pc.cyan(getSkillDisplayName(skill))}`);
-          p.log.message(`    ${pc.dim(skill.description)}`);
-        }
+      if (discoveredMcps.length > 0) {
         console.log();
-      }
-
-      // Print ungrouped
-      if (ungroupedSkills.length > 0) {
-        if (sortedGroups.length > 0) console.log(pc.bold('General'));
-        for (const skill of ungroupedSkills) {
-          p.log.message(`  ${pc.cyan(getSkillDisplayName(skill))}`);
-          p.log.message(`    ${pc.dim(skill.description)}`);
+        p.log.step(pc.bold('Available MCP Servers'));
+        for (const server of discoveredMcps) {
+          const commandLine =
+            server.transport === 'stdio'
+              ? `${server.command}${server.args && server.args.length > 0 ? ` ${server.args.join(' ')}` : ''}`
+              : server.url || '';
+          p.log.message(`  ${pc.cyan(server.name)} ${pc.dim(`(${server.sourcePath})`)}`);
+          p.log.message(`    ${pc.dim(commandLine)}`);
         }
       }
 
@@ -981,6 +1014,16 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       await cleanup(tempDir);
       process.exit(0);
     }
+
+    const duplicateSkillNames = new Set(getDuplicateSkillNameGroups(skills).keys());
+    const skillChoiceHint = (skill: Skill) => {
+      const description =
+        skill.description.length > 60 ? skill.description.slice(0, 57) + '...' : skill.description;
+      if (!duplicateSkillNames.has(skill.name.toLowerCase()) || !skill.path) {
+        return description;
+      }
+      return `${description} · ${shortenPath(skill.path, process.cwd())}`;
+    };
 
     let selectedSkills: Skill[];
 
@@ -1043,7 +1086,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
           grouped[groupName]!.push({
             value: s,
             label: getSkillDisplayName(s),
-            hint: s.description.length > 60 ? s.description.slice(0, 57) + '...' : s.description,
+            hint: skillChoiceHint(s),
           });
         }
 
@@ -1056,7 +1099,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         const skillChoices = sortedSkills.map((s) => ({
           value: s,
           label: getSkillDisplayName(s),
-          hint: s.description.length > 60 ? s.description.slice(0, 57) + '...' : s.description,
+          hint: skillChoiceHint(s),
         }));
 
         selected = await multiselect({
@@ -1073,6 +1116,25 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       }
 
       selectedSkills = selected as Skill[];
+    }
+
+    const selectedDuplicateGroups = getDuplicateSkillNameGroups(selectedSkills);
+    if (selectedDuplicateGroups.size > 0) {
+      p.log.error('Duplicate skill names selected. Install one conflicting path at a time.');
+      for (const [name, group] of selectedDuplicateGroups) {
+        p.log.message(`  ${pc.cyan(name)}`);
+        for (const skill of group) {
+          p.log.message(`    ${pc.dim(shortenPath(skill.path, process.cwd()))}`);
+        }
+      }
+      await cleanup(tempDir);
+      process.exit(1);
+    }
+
+    if (discoveredMcps.length > 0) {
+      p.log.info(
+        `Found ${discoveredMcps.length} MCP server definition${discoveredMcps.length === 1 ? '' : 's'}; not installing MCPs automatically. Use --list to inspect them.`
+      );
     }
 
     let targetAgents: AgentType[];
