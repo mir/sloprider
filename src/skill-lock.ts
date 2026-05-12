@@ -37,14 +37,6 @@ export interface SkillLockEntry {
 }
 
 /**
- * Tracks dismissed prompts so they're not shown again.
- */
-export interface DismissedPrompts {
-  /** Dismissed the find-skills skill installation prompt */
-  findSkillsPrompt?: boolean;
-}
-
-/**
  * The structure of the skill lock file.
  */
 export interface SkillLockFile {
@@ -52,8 +44,6 @@ export interface SkillLockFile {
   version: number;
   /** Map of skill name to its lock entry */
   skills: Record<string, SkillLockEntry>;
-  /** Tracks dismissed prompts */
-  dismissed?: DismissedPrompts;
   /** Last selected agents for installation */
   lastSelectedAgents?: string[];
 }
@@ -186,19 +176,22 @@ export async function fetchSkillFolderHash(
 export async function addSkillToLock(
   skillName: string,
   entry: Omit<SkillLockEntry, 'installedAt' | 'updatedAt'>
-): Promise<void> {
+): Promise<SkillLockEntry> {
   const lock = await readSkillLock();
   const now = new Date().toISOString();
 
   const existingEntry = lock.skills[skillName];
 
-  lock.skills[skillName] = {
+  const nextEntry: SkillLockEntry = {
     ...entry,
     installedAt: existingEntry?.installedAt ?? now,
     updatedAt: now,
   };
 
+  lock.skills[skillName] = nextEntry;
+
   await writeSkillLock(lock);
+  return nextEntry;
 }
 
 /**
@@ -260,28 +253,7 @@ function createEmptyLockFile(): SkillLockFile {
   return {
     version: CURRENT_VERSION,
     skills: {},
-    dismissed: {},
   };
-}
-
-/**
- * Check if a prompt has been dismissed.
- */
-export async function isPromptDismissed(promptKey: keyof DismissedPrompts): Promise<boolean> {
-  const lock = await readSkillLock();
-  return lock.dismissed?.[promptKey] === true;
-}
-
-/**
- * Mark a prompt as dismissed.
- */
-export async function dismissPrompt(promptKey: keyof DismissedPrompts): Promise<void> {
-  const lock = await readSkillLock();
-  if (!lock.dismissed) {
-    lock.dismissed = {};
-  }
-  lock.dismissed[promptKey] = true;
-  await writeSkillLock(lock);
 }
 
 /**

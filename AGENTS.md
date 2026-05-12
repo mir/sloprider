@@ -8,23 +8,20 @@ This file provides guidance to AI coding agents working on the `agentart` CLI co
 
 ## Commands
 
-| Command                         | Description                                         |
-| ------------------------------- | --------------------------------------------------- |
-| `agentart`                      | Show banner with available commands                 |
-| `agentart add <pkg>`            | Install skills from git repos, URLs, or local paths |
-| `agentart experimental_install` | Restore skills from agentart-lock.json              |
-| `agentart experimental_sync`    | Sync skills from node_modules into agent dirs       |
-| `agentart list`                 | List installed skills (alias: `ls`)                 |
-| `agentart update [skills...]`   | Update skills to latest versions                    |
-| `agentart init [name]`          | Create a new SKILL.md template                      |
+| Command                       | Description                                         |
+| ----------------------------- | --------------------------------------------------- |
+| `agentart`                    | Show banner with available commands                 |
+| `agentart add <pkg>`          | Install skills from git repos, URLs, or local paths |
+| `agentart list`               | List installed skills (alias: `ls`)                 |
+| `agentart update [skills...]` | Update skills to latest versions                    |
 
-Aliases: `agentart a` works for `add`. `agentart i`, `agentart install` (no args) restore from `agentart-lock.json`. `agentart ls` works for `list`. `agentart experimental_install` restores from `agentart-lock.json`. `agentart experimental_sync` crawls `node_modules` for skills.
+Aliases: `agentart a`, `agentart i`, and `agentart install` work for `add`. `agentart ls` works for `list`.
 
 ## Architecture
 
 ```
 src/
-├── cli.ts           # Main entry point, command routing, init/check/update
+├── cli.ts           # Main entry point, command routing, check/update
 ├── cli.test.ts      # CLI tests
 ├── add.ts           # Core add command logic
 ├── add-prompt.test.ts # Add prompt behavior tests
@@ -40,7 +37,6 @@ src/
 ├── skills.ts        # Skill discovery and parsing
 ├── skill-lock.ts    # Global lock file management (~/.agents/.skill-lock.json)
 ├── local-lock.ts    # Local lock file management (agentart-lock.json, checked in)
-├── sync.ts          # Sync command - crawl node_modules for skills
 ├── source-parser.ts # Parse git URLs, GitHub shorthand, local paths
 ├── git.ts           # Git clone operations
 ├── types.ts         # TypeScript types
@@ -55,7 +51,6 @@ src/
 │   ├── huggingface.ts
 │   ├── mintlify.ts
 │   └── wellknown.ts
-├── init.test.ts     # Init command tests
 └── test-utils.ts    # Test utilities
 
 tests/
@@ -92,12 +87,11 @@ If reading an older lock file version, it's wiped. Users must reinstall skills t
 
 ## Key Integration Points
 
-| Feature                      | Implementation                                                  |
-| ---------------------------- | --------------------------------------------------------------- |
-| `agentart add`               | `src/add.ts` - full implementation                              |
-| `agentart experimental_sync` | `src/sync.ts` - crawl node_modules                              |
-| `agentart check`             | `src/cli.ts` + `fetchSkillFolderHash` in `src/skill-lock.ts`    |
-| `agentart update`            | `src/cli.ts` direct hash compare + reinstall via `agentart add` |
+| Feature           | Implementation                                                  |
+| ----------------- | --------------------------------------------------------------- |
+| `agentart add`    | `src/add.ts` - full implementation                              |
+| `agentart check`  | `src/cli.ts` + `fetchSkillFolderHash` in `src/skill-lock.ts`    |
+| `agentart update` | `src/cli.ts` direct hash compare + reinstall via `agentart add` |
 
 ## Development
 
@@ -110,10 +104,8 @@ bun run build
 
 # Test locally
 bun run dev add vercel-labs/agent-skills --list
-bun run dev experimental_sync
 bun run dev check
 bun run dev update
-bun run dev init my-skill
 
 # Run all tests
 bun run test

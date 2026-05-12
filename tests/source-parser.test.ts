@@ -190,10 +190,10 @@ describe('parseSource', () => {
     });
 
     it('GitHub shorthand - owner/repo@skill with hyphenated skill name', () => {
-      const result = parseSource('vercel-labs/agent-skills@find-skills');
+      const result = parseSource('vercel-labs/agent-skills@frontend-design');
       expect(result.type).toBe('github');
       expect(result.url).toBe('https://github.com/vercel-labs/agent-skills.git');
-      expect(result.skillFilter).toBe('find-skills');
+      expect(result.skillFilter).toBe('frontend-design');
     });
 
     it('GitHub shorthand - owner/repo#branch', () => {

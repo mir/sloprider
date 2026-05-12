@@ -9,9 +9,13 @@ describe('agentart CLI', () => {
       const output = runCliOutput(['--help']);
       expect(output).toContain('Usage: agentart <command> [options]');
       expect(output).toContain('Manage Skills:');
-      expect(output).toContain('init [name]');
+      expect(output).not.toContain('init [name]');
+      expect(output).not.toContain('experimental_install');
+      expect(output).not.toContain('experimental_sync');
       expect(output).toContain('add <package>');
       expect(output).toContain('update');
+      expect(output).not.toMatch(/find\s+\[query\]/);
+      expect(output).not.toMatch(/agentart\s+find/);
       expect(output).toContain('Add Options:');
       expect(output).toContain('-g, --global');
       expect(output).toContain('-a, --agent');
@@ -49,7 +53,10 @@ describe('agentart CLI', () => {
       expect(output).toContain('Agentart: the open agent skills ecosystem');
       expect(output).toContain('agentart add');
       expect(output).toContain('agentart update');
-      expect(output).toContain('agentart init');
+      expect(output).not.toContain('agentart init');
+      expect(output).not.toContain('agentart experimental_install');
+      expect(output).not.toContain('agentart experimental_sync');
+      expect(output).not.toMatch(/agentart\s+find/);
       expect(output).toContain('skills.sh');
     });
   });
@@ -63,6 +70,14 @@ describe('agentart CLI', () => {
         "
       `);
     });
+
+    it.each(['find', 'search', 'f', 's', 'init', 'experimental_install', 'experimental_sync'])(
+      'should show error for removed %s command',
+      (command) => {
+        const output = runCliOutput([command]);
+        expect(output).toBe(`Unknown command: ${command}\nRun agentart --help for usage.\n`);
+      }
+    );
   });
 
   describe('logo display', () => {

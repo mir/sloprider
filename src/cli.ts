@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'child_process';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
-import { basename, join } from 'path';
+import { readFileSync, existsSync, readdirSync } from 'fs';
+import { join } from 'path';
 import { homedir } from 'os';
 import * as p from '@clack/prompts';
 import { runAdd, parseAddOptions } from './add.ts';
-import { runFind } from './find.ts';
-import { runInstallFromLock } from './install.ts';
 import { runList } from './list.ts';
 import { removeCommand, parseRemoveOptions } from './remove.ts';
 import { sanitizeMetadata } from './sanitize.ts';
-import { runSync, parseSyncOptions } from './sync.ts';
 import { runMcp, showMcpHelp } from './mcp.ts';
 import { isRunningInAgent } from './detect-agent.ts';
 import { agents, isUniversalAgent } from './agents.ts';
@@ -74,25 +71,12 @@ function showBanner(): void {
   console.log(
     `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} list${RESET}                 ${DIM}List installed skills${RESET}`
   );
-  console.log(
-    `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} find ${DIM}[query]${RESET}         ${DIM}Search for skills${RESET}`
-  );
   console.log();
   console.log(
     `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} update${RESET}               ${DIM}Update installed skills${RESET}`
   );
   console.log(
     `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} mcp${RESET}                  ${DIM}Manage MCP servers${RESET}`
-  );
-  console.log();
-  console.log(
-    `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} experimental_install${RESET} ${DIM}Restore from agentart-lock.json${RESET}`
-  );
-  console.log(
-    `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} init ${DIM}[name]${RESET}          ${DIM}Create a new skill${RESET}`
-  );
-  console.log(
-    `  ${DIM}$${RESET} ${TEXT}${CLI_COMMAND} experimental_sync${RESET}    ${DIM}Sync skills from node_modules${RESET}`
   );
   console.log();
   console.log(`${DIM}try:${RESET} ${CLI_COMMAND} add vercel-labs/agent-skills`);
@@ -111,7 +95,6 @@ ${BOLD}Manage Skills:${RESET}
                             https://github.com/vercel-labs/agent-skills
   remove [skills]      Remove installed skills
   list, ls             List installed skills
-  find [query]         Search for skills interactively
 
 ${BOLD}Updates:${RESET}
   update [skills...]   Update skills to latest versions (alias: upgrade)
@@ -121,11 +104,6 @@ ${BOLD}Update Options:${RESET}
   -g, --global           Update global skills only
   -p, --project          Update project skills only
   -y, --yes              Skip scope prompt (auto-detect: project if in a project, else global)
-
-${BOLD}Project:${RESET}
-  experimental_install Restore skills from agentart-lock.json
-  init [name]          Initialize a skill (creates <name>/SKILL.md or ./SKILL.md)
-  experimental_sync    Sync skills from node_modules into agent directories
 
 ${BOLD}MCP:${RESET}
   mcp add <name> -- <command> [args...]   Add a stdio MCP server
@@ -150,10 +128,6 @@ ${BOLD}Remove Options:${RESET}
   -s, --skill <skills>   Specify skills to remove (use '*' for all skills)
   -y, --yes              Skip confirmation prompts
   --all                  Shorthand for --skill '*' --agent '*' -y
-  
-${BOLD}Experimental Sync Options:${RESET}
-  -a, --agent <agents>   Specify agents to install to (use '*' for all agents)
-  -y, --yes              Skip confirmation prompts
 
 ${BOLD}List Options:${RESET}
   -g, --global           List global skills (default: project)
@@ -178,17 +152,11 @@ ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} agentart ls --all                       ${DIM}# list all skills and MCP servers${RESET}
   ${DIM}$${RESET} agentart ls -a claude-code             ${DIM}# filter by agent${RESET}
   ${DIM}$${RESET} agentart ls --json                      ${DIM}# JSON output${RESET}
-  ${DIM}$${RESET} agentart find                          ${DIM}# interactive search${RESET}
-  ${DIM}$${RESET} agentart find typescript               ${DIM}# search by keyword${RESET}
   ${DIM}$${RESET} agentart update
   ${DIM}$${RESET} agentart update my-skill             ${DIM}# update a single skill${RESET}
   ${DIM}$${RESET} agentart update -g                    ${DIM}# update global skills only${RESET}
   ${DIM}$${RESET} agentart mcp add context7 -- npx -y @upstash/context7-mcp
   ${DIM}$${RESET} agentart mcp list
-  ${DIM}$${RESET} agentart experimental_install            ${DIM}# restore from agentart-lock.json${RESET}
-  ${DIM}$${RESET} agentart init my-skill
-  ${DIM}$${RESET} agentart experimental_sync              ${DIM}# sync from node_modules${RESET}
-  ${DIM}$${RESET} agentart experimental_sync -y           ${DIM}# sync without prompts${RESET}
 
 Discover more skills at ${TEXT}https://skills.sh/${RESET}
 `);
@@ -223,69 +191,6 @@ ${BOLD}Examples:${RESET}
 
 Discover more skills at ${TEXT}https://skills.sh/${RESET}
 `);
-}
-
-function runInit(args: string[]): void {
-  const cwd = process.cwd();
-  const skillName = args[0] || basename(cwd);
-  const hasName = args[0] !== undefined;
-
-  const skillDir = hasName ? join(cwd, skillName) : cwd;
-  const skillFile = join(skillDir, 'SKILL.md');
-  const displayPath = hasName ? `${skillName}/SKILL.md` : 'SKILL.md';
-
-  if (existsSync(skillFile)) {
-    console.log(`${TEXT}Skill already exists at ${DIM}${displayPath}${RESET}`);
-    return;
-  }
-
-  if (hasName) {
-    mkdirSync(skillDir, { recursive: true });
-  }
-
-  const skillContent = `---
-name: ${skillName}
-description: A brief description of what this skill does
----
-
-# ${skillName}
-
-Instructions for the agent to follow when this skill is activated.
-
-## When to use
-
-Describe when this skill should be used.
-
-## Instructions
-
-1. First step
-2. Second step
-3. Additional steps as needed
-`;
-
-  writeFileSync(skillFile, skillContent);
-
-  console.log(`${TEXT}Initialized skill: ${DIM}${skillName}${RESET}`);
-  console.log();
-  console.log(`${DIM}Created:${RESET}`);
-  console.log(`  ${displayPath}`);
-  console.log();
-  console.log(`${DIM}Next steps:${RESET}`);
-  console.log(`  1. Edit ${TEXT}${displayPath}${RESET} to define your skill instructions`);
-  console.log(
-    `  2. Update the ${TEXT}name${RESET} and ${TEXT}description${RESET} in the frontmatter`
-  );
-  console.log();
-  console.log(`${DIM}Publishing:${RESET}`);
-  console.log(
-    `  ${DIM}GitHub:${RESET}  Push to a repo, then ${TEXT}${CLI_COMMAND} add <owner>/<repo>${RESET}`
-  );
-  console.log(
-    `  ${DIM}URL:${RESET}     Host the file, then ${TEXT}${CLI_COMMAND} add https://example.com/${displayPath}${RESET}`
-  );
-  console.log();
-  console.log(`Browse existing skills for inspiration at ${TEXT}https://skills.sh/${RESET}`);
-  console.log();
 }
 
 // ============================================
@@ -905,24 +810,6 @@ async function main(): Promise<void> {
   const restArgs = args.slice(1);
 
   switch (command) {
-    case 'find':
-    case 'search':
-    case 'f':
-    case 's':
-      if (!inAgent) showLogo();
-      console.log();
-      await runFind(restArgs);
-      break;
-    case 'init':
-      if (!inAgent) showLogo();
-      console.log();
-      runInit(restArgs);
-      break;
-    case 'experimental_install': {
-      if (!inAgent) showLogo();
-      await runInstallFromLock(restArgs);
-      break;
-    }
     case 'i':
     case 'install':
     case 'a':
@@ -943,12 +830,6 @@ async function main(): Promise<void> {
       const { skills, options: removeOptions } = parseRemoveOptions(restArgs);
       await removeCommand(skills, removeOptions);
       break;
-    case 'experimental_sync': {
-      if (!inAgent) showLogo();
-      const { options: syncOptions } = parseSyncOptions(restArgs);
-      await runSync(restArgs, syncOptions);
-      break;
-    }
     case 'mcp':
       await runMcp(restArgs);
       break;

@@ -109,13 +109,11 @@ When installing interactively, you can choose:
 
 ## Other Commands
 
-| Command                    | Description                                   |
-| -------------------------- | --------------------------------------------- |
-| `agentart list`            | List installed skills (alias: `ls`)           |
-| `agentart find [query]`    | Search for skills interactively or by keyword |
-| `agentart remove [skills]` | Remove installed skills from agents           |
-| `agentart update [skills]` | Update installed skills to latest versions    |
-| `agentart init [name]`     | Create a new SKILL.md template                |
+| Command                    | Description                                |
+| -------------------------- | ------------------------------------------ |
+| `agentart list`            | List installed skills (alias: `ls`)        |
+| `agentart remove [skills]` | Remove installed skills from agents        |
+| `agentart update [skills]` | Update installed skills to latest versions |
 
 ### `agentart list`
 
@@ -130,18 +128,6 @@ agentart ls -g
 
 # Filter by specific agents
 agentart ls -a claude-code -a cursor
-```
-
-### `agentart find`
-
-Search for skills interactively or by keyword.
-
-```bash
-# Interactive search (fzf-style)
-agentart find
-
-# Search by keyword
-agentart find typescript
 ```
 
 ### `agentart update`
@@ -170,16 +156,6 @@ agentart update -y
 | `-p, --project` | Only update project skills                                                |
 | `-y, --yes`     | Skip scope prompt (auto-detect: project if in a project dir, else global) |
 | `[skills...]`   | Update specific skills by name instead of all                             |
-
-### `agentart init`
-
-```bash
-# Create SKILL.md in current directory
-agentart init
-
-# Create a new skill in a subdirectory
-agentart init my-skill
-```
 
 ### `agentart remove`
 
