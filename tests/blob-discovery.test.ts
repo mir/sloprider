@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { findSkillMdPaths, type RepoTree } from '../src/blob.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { findSkillMdPaths, tryBlobInstall, type RepoTree } from '../src/blob.ts';
 
 function tree(paths: string[]): RepoTree {
   return {
@@ -10,6 +10,10 @@ function tree(paths: string[]): RepoTree {
 }
 
 describe('blob skill discovery', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('returns all SKILL.md paths through depth 10 with priority ordering', () => {
     const repoTree = tree([
       'z/other/SKILL.md',
@@ -31,5 +35,63 @@ describe('blob skill discovery', () => {
     const repoTree = tree(['skills/parent/SKILL.md', 'skills/parent/children/child/SKILL.md']);
 
     expect(findSkillMdPaths(repoTree, 'skills/parent')).toEqual(['skills/parent/SKILL.md']);
+  });
+
+  it('falls back to parent folder name when blob SKILL.md has no name', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+
+        if (url.includes('/repos/acme/repo/git/trees/HEAD')) {
+          return new Response(
+            JSON.stringify({
+              sha: 'root',
+              tree: [
+                {
+                  path: 'plugins/semrush-context/skills/daily-briefing/SKILL.md',
+                  type: 'blob',
+                  sha: 'skill',
+                },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+
+        if (
+          url ===
+          'https://raw.githubusercontent.com/acme/repo/HEAD/plugins/semrush-context/skills/daily-briefing/SKILL.md'
+        ) {
+          return new Response(
+            `---
+description: Daily briefing skill
+---
+
+# Daily Briefing
+`,
+            { status: 200 }
+          );
+        }
+
+        if (url === 'https://skills.sh/api/download/acme/repo/daily-briefing') {
+          return new Response(
+            JSON.stringify({
+              files: [{ path: 'SKILL.md', contents: '# Daily Briefing\n' }],
+              hash: 'snapshot',
+            }),
+            { status: 200 }
+          );
+        }
+
+        return new Response('', { status: 404 });
+      })
+    );
+
+    const result = await tryBlobInstall('acme/repo');
+
+    expect(result?.skills).toHaveLength(1);
+    expect(result?.skills[0]?.name).toBe('daily-briefing');
+    expect(result?.skills[0]?.description).toBe('Daily briefing skill');
   });
 });

@@ -243,4 +243,22 @@ description: Deep skill
     const skills = await discoverSkills(testDir);
     expect(skills.map((s) => s.name)).toEqual(['deep-skill']);
   });
+
+  it('should fall back to parent folder name when name frontmatter is missing', async () => {
+    const skillDir = join(testDir, 'plugins', 'semrush-context', 'skills', 'daily-briefing');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      `---
+description: Daily briefing skill
+version: 0.1.0
+---
+
+# Daily Briefing
+`
+    );
+
+    const skills = await discoverSkills(testDir);
+    expect(skills.map((s) => s.name)).toEqual(['daily-briefing']);
+  });
 });

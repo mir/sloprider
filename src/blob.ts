@@ -334,15 +334,25 @@ export async function tryBlobInstall(
     if (!content) continue;
 
     const { data } = parseFrontmatter(content);
-    if (!data.name || !data.description) continue;
-    if (typeof data.name !== 'string' || typeof data.description !== 'string') continue;
+    if (!data.description) continue;
+    if (
+      (data.name !== undefined && (typeof data.name !== 'string' || data.name.length === 0)) ||
+      typeof data.description !== 'string'
+    ) {
+      continue;
+    }
 
     // Skip internal skills unless explicitly requested
     const metadata = isRecord(data.metadata) ? data.metadata : undefined;
     const isInternal = metadata?.internal === true;
     if (isInternal && !options.includeInternal) continue;
 
-    const safeName = sanitizeMetadata(data.name);
+    const pathParts = mdPath.replace(/\\/g, '/').split('/');
+    const fallbackName =
+      pathParts.length > 1 ? pathParts[pathParts.length - 2] : ownerRepo.split('/').at(-1);
+    if (!fallbackName) continue;
+
+    const safeName = sanitizeMetadata(data.name ?? fallbackName);
     const safeDescription = sanitizeMetadata(data.description);
 
     parsedSkills.push({

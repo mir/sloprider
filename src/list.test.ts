@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, rmSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { runCli } from './test-utils.ts';
@@ -8,9 +8,19 @@ import { parseListOptions } from './list.ts';
 describe('list command', () => {
   let testDir: string;
 
+  function testHomeEnv(homeDir: string): Record<string, string> {
+    return {
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
+      CODEX_HOME: join(homeDir, '.codex'),
+      XDG_CONFIG_HOME: join(homeDir, '.config'),
+      XDG_STATE_HOME: join(homeDir, '.local', 'state'),
+    };
+  }
+
   beforeEach(() => {
-    testDir = join(tmpdir(), `agentart-list-test-${Date.now()}`);
-    mkdirSync(testDir, { recursive: true });
+    testDir = mkdtempSync(join(tmpdir(), 'agentart-list-test-'));
   });
 
   afterEach(() => {
@@ -218,6 +228,9 @@ description: Second skill
     });
 
     it('should respect -g flag for global only', () => {
+      const homeDir = join(testDir, 'home');
+      const env = testHomeEnv(homeDir);
+
       // Create a project skill (should not be shown with -g)
       const skillDir = join(testDir, '.agents', 'skills', 'project-skill');
       mkdirSync(skillDir, { recursive: true });
@@ -231,21 +244,28 @@ description: A project skill
 `
       );
 
-      const result = runCli(['list', '-g'], testDir);
+      const globalSkillDir = join(homeDir, '.agents', 'skills', 'global-skill');
+      mkdirSync(globalSkillDir, { recursive: true });
+      writeFileSync(
+        join(globalSkillDir, 'SKILL.md'),
+        `---
+name: global-skill
+description: A global skill
+---
+# Global Skill
+`
+      );
+
+      const result = runCli(['list', '-g'], testDir, env);
       // Should not show project skill when -g is specified
       expect(result.stdout).not.toContain('project-skill');
       expect(result.stdout).toContain('Global Skills');
+      expect(result.stdout).toContain('global-skill');
     });
 
     it('should list project and global skills plus MCPs with --all', () => {
       const homeDir = join(testDir, 'home');
-      const env = {
-        HOME: homeDir,
-        CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
-        CODEX_HOME: join(homeDir, '.codex'),
-        XDG_CONFIG_HOME: join(homeDir, '.config'),
-        XDG_STATE_HOME: join(homeDir, '.local', 'state'),
-      };
+      const env = testHomeEnv(homeDir);
 
       const projectSkillDir = join(testDir, '.agents', 'skills', 'project-skill');
       mkdirSync(projectSkillDir, { recursive: true });
@@ -304,13 +324,7 @@ description: A global skill
 
     it('should output skills and MCPs as structured JSON with --all --json', () => {
       const homeDir = join(testDir, 'home-json');
-      const env = {
-        HOME: homeDir,
-        CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
-        CODEX_HOME: join(homeDir, '.codex'),
-        XDG_CONFIG_HOME: join(homeDir, '.config'),
-        XDG_STATE_HOME: join(homeDir, '.local', 'state'),
-      };
+      const env = testHomeEnv(homeDir);
 
       const skillDir = join(testDir, '.agents', 'skills', 'json-all-skill');
       mkdirSync(skillDir, { recursive: true });
