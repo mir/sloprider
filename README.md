@@ -23,6 +23,7 @@ agentart --help
 
 ```bash
 agentart discover <git-url>
+agentart install <git-url> --scope local|global --agents all|agent[,agent...] --skills name[,name...]
 agentart list
 agentart remove skill <name>
 agentart remove mcp <name>
@@ -32,14 +33,8 @@ agentart manage
 
 ### `agentart discover <git-url>`
 
-Clones a git repository, scans it for skills, MCP server configs, and project hook bundles, then prompts for:
-
-1. artifacts to install
-2. project or global scope
-3. target agents for skills and MCPs
-
-Hook bundles are project-only in V1. They install to their native agent format and require explicit confirmation because
-hooks execute commands.
+Clones a git repository and scans it for skills, MCP server configs, and project hook bundles. This command is
+read-only: it prints discovered artifact names and an explicit `agentart install` command you can edit and run.
 
 Supported sources are git URLs, including HTTPS and SSH:
 
@@ -47,6 +42,20 @@ Supported sources are git URLs, including HTTPS and SSH:
 agentart discover https://github.com/vercel-labs/agent-skills.git
 agentart discover git@github.com:vercel-labs/agent-skills.git
 ```
+
+### `agentart install <git-url>`
+
+Installs explicitly named artifacts from a git repository without prompting:
+
+```bash
+agentart install https://github.com/vercel-labs/agent-skills.git --scope local --agents codex --skills code-review
+agentart install https://github.com/vercel-labs/agent-skills.git --scope global --agents codex,cursor --mcps context7
+agentart install https://github.com/vercel-labs/agent-skills.git --scope local --agents codex --hooks codex-hooks
+```
+
+At least one of `--skills`, `--mcps`, or `--hooks` is required. Artifact names must match names printed by
+`agentart discover`. Use `--agents all` to install the selected skills/MCPs for all compatible agents. Hook bundles are
+project-only in V1, so `--scope global --hooks ...` is rejected.
 
 ### `agentart list`
 

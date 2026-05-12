@@ -21,8 +21,8 @@ import { discoverSkills, getDuplicateSkillNameGroups, getSkillDisplayName } from
 import type { AgentType, ParsedSource, Skill } from './types.ts';
 import type { McpServer } from './mcp-types.ts';
 
-type Scope = 'project' | 'global';
-type Artifact =
+export type Scope = 'project' | 'global';
+export type Artifact =
   | { type: 'skill'; skill: Skill }
   | { type: 'mcp'; server: DiscoveredMcpServer }
   | { type: 'hook'; hook: DiscoveredHookBundle };
@@ -42,7 +42,7 @@ function parseGitSource(input: string): ParsedSource {
   return parsed;
 }
 
-function displayMcp(server: DiscoveredMcpServer): string {
+export function displayMcp(server: DiscoveredMcpServer): string {
   if (server.transport === 'stdio') {
     return [server.command, ...(server.args ?? [])].filter(Boolean).join(' ');
   }
@@ -54,11 +54,11 @@ function stripMcpMetadata(server: DiscoveredMcpServer): McpServer {
   return next;
 }
 
-function relSkillPath(repoDir: string, skill: Skill): string {
+export function relSkillPath(repoDir: string, skill: Skill): string {
   return relative(repoDir, join(skill.path, 'SKILL.md')).split(sep).join('/');
 }
 
-function selectableAgents(scope: Scope, artifacts: Artifact[]): AgentType[] {
+export function selectableAgents(scope: Scope, artifacts: Artifact[]): AgentType[] {
   const hasSkill = artifacts.some((artifact) => artifact.type === 'skill');
   const hasMcp = artifacts.some((artifact) => artifact.type === 'mcp');
   const agentSelectableArtifacts = artifacts.filter((artifact) => artifact.type !== 'hook');
@@ -171,7 +171,7 @@ async function confirmHooks(hooks: DiscoveredHookBundle[]): Promise<void> {
   }
 }
 
-function assertNoDuplicateNames(artifacts: Artifact[]): void {
+export function assertNoDuplicateNames(artifacts: Artifact[]): void {
   const skills = artifacts
     .filter(
       (artifact): artifact is Extract<Artifact, { type: 'skill' }> => artifact.type === 'skill'
@@ -272,7 +272,7 @@ async function writeSkillLocks(
   );
 }
 
-async function install(
+export async function installArtifacts(
   source: string,
   parsed: ParsedSource,
   repoDir: string,
@@ -397,7 +397,7 @@ async function install(
   }
 }
 
-export async function runDiscover(args: string[]): Promise<void> {
+export async function runInteractiveDiscover(args: string[]): Promise<void> {
   const source = args[0];
   if (!source || args.length !== 1) {
     throw new Error('Usage: agentart discover <git-url>');
@@ -434,7 +434,107 @@ export async function runDiscover(args: string[]): Promise<void> {
     }
     await confirmHooks(selectedHooks);
 
-    await install(source, discovered.parsed, discovered.repoDir, artifacts, scope, targetAgents);
+    await installArtifacts(
+      source,
+      discovered.parsed,
+      discovered.repoDir,
+      artifacts,
+      scope,
+      targetAgents
+    );
+    p.outro(pc.green('Done!'));
+  } catch (error) {
+    if (error instanceof GitCloneError) {
+      throw new Error(error.message);
+    }
+    throw error;
+  } finally {
+    if (repoDir) await cleanupTempDir(repoDir).catch(() => {});
+  }
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./#-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function commaList(values: string[]): string {
+  return shellQuote(values.join(','));
+}
+
+function installCommand(
+  source: string,
+  discovered: Awaited<ReturnType<typeof discoverRepo>>
+): string {
+  const args = ['agentart', 'install', shellQuote(source), '--scope', 'local', '--agents', 'all'];
+  const skills = discovered.skills.map(getSkillDisplayName);
+  const mcps = discovered.mcps.map((server) => server.name);
+  const hooks = discovered.hooks.map((hook) => hook.name);
+  if (skills.length > 0) args.push('--skills', commaList(skills));
+  if (mcps.length > 0) args.push('--mcps', commaList(mcps));
+  if (hooks.length > 0) args.push('--hooks', commaList(hooks));
+  return args.join(' ');
+}
+
+function printInventory(
+  source: string,
+  discovered: Awaited<ReturnType<typeof discoverRepo>>
+): void {
+  console.log('');
+  console.log(
+    `Found ${discovered.skills.length} skill(s), ${discovered.mcps.length} MCP server(s), and ${discovered.hooks.length} hook bundle(s).`
+  );
+
+  if (discovered.skills.length > 0) {
+    console.log('\nSkills:');
+    for (const skill of discovered.skills) {
+      const detail = skill.description ? ` - ${skill.description}` : '';
+      console.log(`  ${getSkillDisplayName(skill)}${detail}`);
+    }
+  }
+
+  if (discovered.mcps.length > 0) {
+    console.log('\nMCP servers:');
+    for (const server of discovered.mcps) {
+      const detail = displayMcp(server);
+      console.log(`  ${server.name}${detail ? ` - ${detail}` : ''}`);
+    }
+  }
+
+  if (discovered.hooks.length > 0) {
+    console.log('\nHooks:');
+    for (const hook of discovered.hooks) {
+      console.log(`  ${hook.name} - ${formatHookAgent(hook.agent)} (${hook.events.join(', ')})`);
+    }
+  }
+
+  if (discovered.skills.length > 0 || discovered.mcps.length > 0 || discovered.hooks.length > 0) {
+    console.log('\nInstall selected artifacts explicitly:');
+    console.log(`  ${installCommand(source, discovered)}`);
+  }
+}
+
+export async function runDiscover(args: string[]): Promise<void> {
+  const source = args[0];
+  if (!source || args.length !== 1) {
+    throw new Error('Usage: agentart discover <git-url>');
+  }
+
+  let repoDir: string | null = null;
+  try {
+    p.intro(pc.bgCyan(pc.black(' agentart discover ')));
+    const discovered = await discoverRepo(source);
+    repoDir = discovered.repoDir;
+
+    if (
+      discovered.skills.length === 0 &&
+      discovered.mcps.length === 0 &&
+      discovered.hooks.length === 0
+    ) {
+      throw new Error('No skills, MCP servers, or hook bundles found in this repository.');
+    }
+
+    printInventory(source, discovered);
     p.outro(pc.green('Done!'));
   } catch (error) {
     if (error instanceof GitCloneError) {
