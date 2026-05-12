@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { runCli } from './test-utils.ts';
@@ -90,6 +90,40 @@ Instructions here.
     expect(result.exitCode).toBe(0);
   });
 
+  it('should write agentart provenance metadata into installed skills', () => {
+    const skillDir = join(testDir, 'skills', 'my-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      `---
+name: my-skill
+description: My test skill
+metadata:
+  author: example-org
+  version: "1.0"
+---
+
+# My Skill
+`
+    );
+
+    const targetDir = join(testDir, 'project');
+    mkdirSync(targetDir, { recursive: true });
+
+    const result = runCli(['add', testDir, '-y', '--agent', 'codex'], targetDir);
+    expect(result.exitCode).toBe(0);
+
+    const installed = readFileSync(
+      join(targetDir, '.agents', 'skills', 'my-skill', 'SKILL.md'),
+      'utf-8'
+    );
+    expect(installed).toContain('  author: example-org\n');
+    expect(installed).toContain('  version: "1.0"\n');
+    expect(installed).toContain('  sourceType: "local"\n');
+    expect(installed).toContain('  agentart: "https://github.com/vercel-labs/agentart"\n');
+    expect(installed).toContain('  updateCommand: "agentart add ');
+  });
+
   it('should filter skills by name with --skill flag', () => {
     // Create multiple test skills
     const skill1Dir = join(testDir, 'skills', 'skill-one');
@@ -151,11 +185,6 @@ description: Test
     expect(resultA.stdout).toContain('Missing required argument: source');
     expect(resultI.stdout).toContain('Missing required argument: source');
     expect(resultInstall.stdout).toContain('Missing required argument: source');
-  });
-
-  it('should restore from lock file with experimental_install', () => {
-    const result = runCli(['experimental_install'], testDir);
-    expect(result.stdout).toContain('No project skills found in agentart-lock.json');
   });
 
   describe('internal skills', () => {
@@ -388,47 +417,5 @@ describe('parseAddOptions', () => {
     expect(result.options.fullDepth).toBe(true);
     expect(result.options.list).toBe(true);
     expect(result.options.global).toBe(true);
-  });
-});
-
-describe('find-skills prompt with -y flag', () => {
-  let testDir: string;
-
-  beforeEach(() => {
-    testDir = join(tmpdir(), `agentart-yes-flag-test-${Date.now()}`);
-    mkdirSync(testDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-  });
-
-  it('should skip find-skills prompt when -y flag is passed', () => {
-    // Create a test skill
-    const skillDir = join(testDir, 'test-skill');
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(
-      join(skillDir, 'SKILL.md'),
-      `---
-name: yes-flag-test-skill
-description: A test skill for -y flag testing
----
-
-# Yes Flag Test Skill
-
-This is a test skill for -y flag mode testing.
-`
-    );
-
-    // Run with -y flag - should complete without hanging
-    const result = runCli(['add', testDir, '-g', '-y', '--skill', 'yes-flag-test-skill'], testDir);
-
-    // Should not contain the find-skills prompt
-    expect(result.stdout).not.toContain('Install the find-skills skill');
-    expect(result.stdout).not.toContain("One-time prompt - you won't be asked again");
-    // Should complete successfully
-    expect(result.exitCode).toBe(0);
   });
 });

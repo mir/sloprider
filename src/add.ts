@@ -37,10 +37,9 @@ import {
   addSkillToLock,
   fetchSkillFolderHash,
   getGitHubToken,
-  isPromptDismissed,
-  dismissPrompt,
   getLastSelectedAgents,
   saveSelectedAgents,
+  type SkillLockEntry,
 } from './skill-lock.ts';
 import { addSkillToLocalLock, computeSkillFolderHash } from './local-lock.ts';
 import type { Skill, AgentType } from './types.ts';
@@ -52,6 +51,11 @@ import {
   type BlobInstallResult,
 } from './blob.ts';
 import { discoverMcpServers, type DiscoveredMcpServer } from './mcp-discovery.ts';
+import {
+  buildUpdateCommand,
+  writeInstallMetadataToSkillDir,
+  type InstallMetadata,
+} from './skill-metadata.ts';
 
 /**
  * Shortens a path for display: replaces homedir with ~ and cwd with .
@@ -177,6 +181,64 @@ function buildResultLines(
   }
 
   return lines;
+}
+
+type InstalledResultForMetadata = {
+  skill: string;
+  success: boolean;
+  path: string;
+  canonicalPath?: string;
+  mode: InstallMode;
+  symlinkFailed?: boolean;
+};
+
+function getInstalledSkillDirs(results: InstalledResultForMetadata[], skillName: string): string[] {
+  const dirs = new Set<string>();
+
+  for (const result of results) {
+    if (!result.success || result.skill !== skillName) continue;
+
+    if (result.canonicalPath) {
+      dirs.add(result.canonicalPath);
+    }
+
+    if (result.mode === 'copy' || result.symlinkFailed || !result.canonicalPath) {
+      dirs.add(result.path);
+    }
+  }
+
+  return [...dirs];
+}
+
+async function writeInstallMetadataForSkill(
+  results: InstalledResultForMetadata[],
+  skillName: string,
+  metadata: InstallMetadata
+): Promise<void> {
+  const dirs = getInstalledSkillDirs(results, skillName);
+  await Promise.all(
+    dirs.map(async (dir) => {
+      try {
+        await writeInstallMetadataToSkillDir(dir, metadata);
+      } catch {
+        // Metadata is informational; never fail an otherwise successful install.
+      }
+    })
+  );
+}
+
+function metadataFromLockEntry(entry: SkillLockEntry, updateCommand: string): InstallMetadata {
+  return {
+    source: entry.source,
+    sourceType: entry.sourceType,
+    sourceUrl: entry.sourceUrl,
+    ref: entry.ref,
+    skillPath: entry.skillPath,
+    installedAt: entry.installedAt,
+    updatedAt: entry.updatedAt,
+    pluginName: entry.pluginName,
+    updateCommand,
+  };
 }
 
 /**
@@ -653,19 +715,53 @@ async function handleWellKnownSkills(
   console.log();
   const successful = results.filter((r) => r.success);
   const failed = results.filter((r) => !r.success);
+  const successfulSkillNames = new Set(successful.map((r) => r.skill));
+  const now = new Date().toISOString();
+  const installMetadataBySkill = new Map<string, InstallMetadata>();
+
+  for (const skill of selectedSkills) {
+    if (!successfulSkillNames.has(skill.installName)) continue;
+
+    const updateCommand = buildUpdateCommand({
+      skillName: skill.installName,
+      global: installGlobally,
+      sourceInput: source,
+      canUseUpdateCommand: false,
+    });
+
+    installMetadataBySkill.set(skill.installName, {
+      source: sourceIdentifier,
+      sourceType: 'well-known',
+      sourceUrl: skill.sourceUrl,
+      installedAt: now,
+      updatedAt: now,
+      updateCommand,
+    });
+  }
 
   // Add to skill lock file for update tracking (only for global installs)
   if (successful.length > 0 && installGlobally) {
-    const successfulSkillNames = new Set(successful.map((r) => r.skill));
     for (const skill of selectedSkills) {
       if (successfulSkillNames.has(skill.installName)) {
         try {
-          await addSkillToLock(skill.installName, {
+          const entry = await addSkillToLock(skill.installName, {
             source: sourceIdentifier,
             sourceType: 'well-known',
             sourceUrl: skill.sourceUrl,
             skillFolderHash: '', // Well-known skills don't have a folder hash
           });
+          const updateCommand =
+            installMetadataBySkill.get(skill.installName)?.updateCommand ||
+            buildUpdateCommand({
+              skillName: skill.installName,
+              global: installGlobally,
+              sourceInput: source,
+              canUseUpdateCommand: false,
+            });
+          installMetadataBySkill.set(
+            skill.installName,
+            metadataFromLockEntry(entry, updateCommand)
+          );
         } catch {
           // Don't fail installation if lock file update fails
         }
@@ -675,7 +771,6 @@ async function handleWellKnownSkills(
 
   // Add to local lock file for project-scoped installs
   if (successful.length > 0 && !installGlobally) {
-    const successfulSkillNames = new Set(successful.map((r) => r.skill));
     for (const skill of selectedSkills) {
       if (successfulSkillNames.has(skill.installName)) {
         try {
@@ -699,6 +794,12 @@ async function handleWellKnownSkills(
       }
     }
   }
+
+  await Promise.all(
+    [...installMetadataBySkill.entries()].map(([skillName, metadata]) =>
+      writeInstallMetadataForSkill(successful, skillName, metadata)
+    )
+  );
 
   if (successful.length > 0) {
     const bySkill = new Map<string, typeof results>();
@@ -761,9 +862,6 @@ async function handleWellKnownSkills(
   p.outro(
     pc.green('Done!') + pc.dim('  Review skills before use; they run with full agent permissions.')
   );
-
-  // Prompt for find-skills after successful install
-  await promptForFindSkills(options, targetAgents);
 }
 
 export async function runAdd(args: string[], options: AddOptions = {}): Promise<void> {
@@ -1450,11 +1548,39 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     // breaking restore for private repos that require SSH authentication.
     const isSSH = parsed.url.startsWith('git@');
     const lockSource = isSSH ? parsed.url : normalizedSource;
+    const successfulSkillNames = new Set(successful.map((r) => r.skill));
+    const now = new Date().toISOString();
+    const installMetadataBySkill = new Map<string, InstallMetadata>();
+
+    for (const skill of selectedSkills) {
+      const skillDisplayName = getSkillDisplayName(skill);
+      if (!successfulSkillNames.has(skillDisplayName)) continue;
+
+      const skillPathValue = skillFiles[skill.name];
+      const sourceForMetadata = lockSource || normalizedSource || parsed.url;
+      const canUseUpdateCommand = parsed.type === 'github' && !!skillPathValue;
+      const updateCommand = buildUpdateCommand({
+        skillName: skill.name,
+        global: installGlobally,
+        sourceInput: parsed.type === 'local' ? parsed.url : source,
+        canUseUpdateCommand,
+      });
+
+      installMetadataBySkill.set(skill.name, {
+        source: sourceForMetadata,
+        sourceType: parsed.type,
+        sourceUrl: parsed.url,
+        ref: parsed.ref,
+        skillPath: skillPathValue,
+        installedAt: now,
+        updatedAt: now,
+        pluginName: skill.pluginName,
+        updateCommand,
+      });
+    }
 
     // Add to skill lock file for update tracking (only for global installs)
     if (successful.length > 0 && installGlobally && normalizedSource) {
-      const successfulSkillNames = new Set(successful.map((r) => r.skill));
-
       // For GitHub clone installs, fetch the repo tree once and reuse it
       // for all skills — avoids N sequential API calls that take ~400ms each.
       let cachedTree: Awaited<ReturnType<typeof fetchRepoTree>> | undefined;
@@ -1482,7 +1608,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
               if (hash) skillFolderHash = hash;
             }
 
-            await addSkillToLock(skill.name, {
+            const entry = await addSkillToLock(skill.name, {
               source: lockSource || normalizedSource,
               sourceType: parsed.type,
               sourceUrl: parsed.url,
@@ -1491,6 +1617,15 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
               skillFolderHash,
               pluginName: skill.pluginName,
             });
+            const updateCommand =
+              installMetadataBySkill.get(skill.name)?.updateCommand ||
+              buildUpdateCommand({
+                skillName: skill.name,
+                global: installGlobally,
+                sourceInput: parsed.type === 'local' ? parsed.url : source,
+                canUseUpdateCommand: parsed.type === 'github' && !!skillPathValue,
+              });
+            installMetadataBySkill.set(skill.name, metadataFromLockEntry(entry, updateCommand));
           } catch {
             // Don't fail installation if lock file update fails
           }
@@ -1500,7 +1635,6 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
 
     // Add to local lock file for project-scoped installs
     if (successful.length > 0 && !installGlobally) {
-      const successfulSkillNames = new Set(successful.map((r) => r.skill));
       for (const skill of selectedSkills) {
         const skillDisplayName = getSkillDisplayName(skill);
         if (successfulSkillNames.has(skillDisplayName)) {
@@ -1528,6 +1662,12 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         }
       }
     }
+
+    await Promise.all(
+      [...installMetadataBySkill.entries()].map(([skillName, metadata]) =>
+        writeInstallMetadataForSkill(successful, skillName, metadata)
+      )
+    );
 
     if (successful.length > 0) {
       const bySkill = new Map<string, typeof results>();
@@ -1633,9 +1773,6 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       pc.green('Done!') +
         pc.dim('  Review skills before use; they run with full agent permissions.')
     );
-
-    // Prompt for find-skills after successful install
-    await promptForFindSkills(options, targetAgents);
   } catch (error) {
     if (error instanceof GitCloneError) {
       p.log.error(pc.red(error.isCanceled ? 'Clone canceled' : 'Failed to clone repository'));
@@ -1662,80 +1799,6 @@ async function cleanup(tempDir: string | null) {
     } catch {
       // Ignore cleanup errors
     }
-  }
-}
-
-/**
- * Prompt user to install the find-skills skill after their first installation.
- */
-async function promptForFindSkills(
-  options?: AddOptions,
-  targetAgents?: AgentType[]
-): Promise<void> {
-  // Skip if already dismissed or not in interactive mode
-  if (!process.stdin.isTTY) return;
-  if (options?.yes) return;
-
-  try {
-    const dismissed = await isPromptDismissed('findSkillsPrompt');
-    if (dismissed) return;
-
-    // Check if find-skills is already installed
-    const findSkillsInstalled = await isSkillInstalled('find-skills', 'claude-code', {
-      global: true,
-    });
-    if (findSkillsInstalled) {
-      // Mark as dismissed so we don't check again
-      await dismissPrompt('findSkillsPrompt');
-      return;
-    }
-
-    console.log();
-    p.log.message(pc.dim("One-time prompt - you won't be asked again if you dismiss."));
-    const install = await p.confirm({
-      message: `Install the ${pc.cyan('find-skills')} skill? It helps your agent discover and suggest skills.`,
-    });
-
-    if (p.isCancel(install)) {
-      await dismissPrompt('findSkillsPrompt');
-      return;
-    }
-
-    if (install) {
-      // Install find-skills to the same agents the user selected.
-      await dismissPrompt('findSkillsPrompt');
-
-      const findSkillsAgents = targetAgents;
-
-      // Skip if no valid agents remain after filtering
-      if (!findSkillsAgents || findSkillsAgents.length === 0) {
-        return;
-      }
-
-      console.log();
-      p.log.step('Installing find-skills skill...');
-
-      try {
-        // Call runAdd directly
-        await runAdd(['vercel-labs/agentart'], {
-          skill: ['find-skills'],
-          global: true,
-          yes: true,
-          agent: findSkillsAgents,
-        });
-      } catch {
-        p.log.warn('Failed to install find-skills. You can try again with:');
-        p.log.message(pc.dim('  agentart add vercel-labs/agentart@find-skills -g -y --all'));
-      }
-    } else {
-      // User declined - dismiss the prompt
-      await dismissPrompt('findSkillsPrompt');
-      p.log.message(
-        pc.dim('You can install it later with: agentart add vercel-labs/agentart@find-skills')
-      );
-    }
-  } catch {
-    // Don't fail the main installation if prompt fails
   }
 }
 
