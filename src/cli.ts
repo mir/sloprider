@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { runDiscover } from './discover.ts';
+import { runInstall } from './install.ts';
 import { runList } from './list.ts';
 import { runManage } from './manage.ts';
 import { runRemove } from './remove.ts';
@@ -18,7 +19,8 @@ ${BOLD}Usage:${RESET} agentart [command]
 
 ${BOLD}Commands:${RESET}
   manage                   Interactive install, update, remove, and list flow
-  discover <git-url>       Scan a git repo for skills, MCPs, and hooks, then install selected items
+  discover <git-url>       Scan a git repo and print installable skills, MCPs, and hooks
+  install <git-url>        Install explicitly named skills, MCPs, or hooks
   list                     Show project/global skills and MCPs, plus managed project hooks
   remove skill <name>      Remove an installed skill
   remove mcp <name>        Remove an installed MCP server
@@ -53,6 +55,11 @@ async function main(): Promise<void> {
     if (command === 'discover') {
       if (!inAgent) showLogo();
       await runDiscover(args);
+      return;
+    }
+    if (command === 'install') {
+      if (!inAgent) showLogo();
+      await runInstall(args);
       return;
     }
     if (command === 'list') {

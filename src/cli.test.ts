@@ -8,6 +8,7 @@ describe('agentart CLI', () => {
     const output = runCliOutput(['--help']);
     expect(output).toContain('Usage: agentart [command]');
     expect(output).toContain('discover <git-url>');
+    expect(output).toContain('install <git-url>');
     expect(output).toContain('remove skill <name>');
     expect(output).toContain('remove mcp <name>');
     expect(output).toContain('remove hook <name>');

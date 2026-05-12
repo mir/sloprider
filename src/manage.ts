@@ -3,7 +3,7 @@ import { join, relative, sep } from 'path';
 import { cleanupTempDir } from './git.ts';
 import pc from './colors.ts';
 import { agents } from './agents.ts';
-import { runDiscover, discoverRepo } from './discover.ts';
+import { runInteractiveDiscover, discoverRepo } from './discover.ts';
 import { collectInstalledArtifacts, type Scope } from './list.ts';
 import { runList } from './list.ts';
 import { installSkillForAgent } from './installer.ts';
@@ -260,7 +260,7 @@ async function addFromUrl(): Promise<void> {
     process.exit(0);
   }
   if (!value || typeof value !== 'string') return;
-  await runDiscover([value]);
+  await runInteractiveDiscover([value]);
 }
 
 export async function runManage(options: ManageOptions = {}): Promise<void> {

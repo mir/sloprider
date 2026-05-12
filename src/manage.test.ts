@@ -194,4 +194,26 @@ description: Test skill
     expect(output).toContain('Skills');
     expect(output).toContain('managed-list-skill');
   });
+
+  it('keeps discover from the manage menu interactive', async () => {
+    const runInteractiveDiscover = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('./discover.ts', () => ({
+      runInteractiveDiscover,
+      discoverRepo: vi.fn(),
+    }));
+    vi.doMock('@clack/prompts', () => ({
+      default: {},
+      intro: vi.fn(),
+      outro: vi.fn(),
+      select: vi.fn().mockResolvedValue('discover'),
+      text: vi.fn().mockResolvedValue('https://example.com/acme/repo.git'),
+      cancel: vi.fn(),
+      log: { warn: vi.fn(), success: vi.fn(), message: vi.fn(), error: vi.fn() },
+    }));
+
+    const { runManage } = await import('./manage.ts');
+    await runManage({ showLogo: false });
+
+    expect(runInteractiveDiscover).toHaveBeenCalledWith(['https://example.com/acme/repo.git']);
+  });
 });

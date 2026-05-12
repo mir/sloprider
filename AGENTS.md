@@ -11,21 +11,24 @@ This file provides guidance to AI coding agents working on the `agentart` CLI co
 | Command                        | Description                                       |
 | ------------------------------ | ------------------------------------------------- |
 | `agentart`                     | Show banner with available commands               |
-| `agentart discover <git-url>`  | Scan a git repo for skills, MCPs, hooks; install  |
+| `agentart discover <git-url>`  | Scan a git repo for skills, MCPs, hooks           |
+| `agentart install <git-url>`   | Install explicitly named skills, MCPs, or hooks   |
 | `agentart list`                | List project/global skills/MCPs and project hooks |
 | `agentart remove skill <name>` | Remove an installed skill                         |
 | `agentart remove mcp <name>`   | Remove an installed MCP server                    |
 | `agentart remove hook <name>`  | Remove a managed project hook bundle              |
 | `agentart manage`              | Interactive install, update, and remove flow      |
 
-There are no command aliases and no non-interactive install flags.
+There are no command aliases. Direct `discover` is read-only; use `install` with explicit artifact lists for
+non-interactive installation.
 
 ## Architecture
 
 ```
 src/
 ├── cli.ts              # Main command routing and help
-├── discover.ts         # Git clone, skill/MCP/hook scan, interactive install
+├── discover.ts         # Git clone, skill/MCP/hook scan, interactive install flow
+├── install.ts          # Non-interactive install command parsing and selection
 ├── manage.ts           # Interactive management flow
 ├── list.ts             # Project/global artifact listing
 ├── remove.ts           # Skill, MCP, and hook removal
