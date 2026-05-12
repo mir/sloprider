@@ -47,12 +47,15 @@ export async function parseSkillMd(
     const content = await readFile(skillMdPath, 'utf-8');
     const { data } = parseFrontmatter(content);
 
-    if (!data.name || !data.description) {
+    if (!data.description) {
       return null;
     }
 
     // Ensure name and description are strings (YAML can parse numbers, booleans, etc.)
-    if (typeof data.name !== 'string' || typeof data.description !== 'string') {
+    if (
+      (data.name !== undefined && (typeof data.name !== 'string' || data.name.length === 0)) ||
+      typeof data.description !== 'string'
+    ) {
       return null;
     }
 
@@ -66,7 +69,7 @@ export async function parseSkillMd(
     }
 
     return {
-      name: sanitizeMetadata(data.name),
+      name: sanitizeMetadata(data.name ?? basename(dirname(skillMdPath))),
       description: sanitizeMetadata(data.description),
       path: dirname(skillMdPath),
       rawContent: content,

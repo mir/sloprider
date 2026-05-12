@@ -42,7 +42,7 @@ import {
   type SkillLockEntry,
 } from './skill-lock.ts';
 import { addSkillToLocalLock, computeSkillFolderHash } from './local-lock.ts';
-import type { Skill, AgentType } from './types.ts';
+import type { Skill, AgentType, ParsedSource } from './types.ts';
 import {
   tryBlobInstall,
   getSkillFolderHashFromTree,
@@ -386,6 +386,87 @@ export interface AddOptions {
   copy?: boolean;
 }
 
+type Spinner = ReturnType<typeof p.spinner>;
+
+export interface CloneAndDiscoverResult {
+  tempDir: string;
+  skills: Skill[];
+  discoveredMcps: DiscoveredMcpServer[];
+}
+
+export async function cloneAndDiscoverSkills(
+  parsed: ParsedSource,
+  options: AddOptions,
+  spinner: Spinner,
+  includeInternal: boolean
+): Promise<CloneAndDiscoverResult> {
+  spinner.start('Cloning repository...');
+  const tempDir = await cloneRepo(parsed.url, parsed.ref, {
+    onProgress: (message) => spinner.message(`Cloning repository... ${message}`),
+  });
+  spinner.stop('Repository cloned');
+
+  spinner.start('Discovering skills...');
+  const skills = await discoverSkills(tempDir, parsed.subpath, {
+    includeInternal,
+    fullDepth: options.fullDepth,
+  });
+  const discoveredMcps = await discoverMcpServers(
+    parsed.subpath ? join(tempDir, parsed.subpath) : tempDir
+  );
+
+  return { tempDir, skills, discoveredMcps };
+}
+
+export function shouldFallbackToWellKnownAfterCloneError(error: unknown): boolean {
+  return !(
+    error instanceof GitCloneError &&
+    (error.isAuthError || error.isTimeout || error.isCanceled)
+  );
+}
+
+export function getWellKnownAttemptLines(gitUrl?: string): string[] {
+  const lines: string[] = [];
+  if (gitUrl) {
+    lines.push(`- git clone ${gitUrl}`);
+  }
+  lines.push('- /.well-known/agent-skills/index.json');
+  lines.push('- /.well-known/skills/index.json');
+  return lines;
+}
+
+export async function tryCloneAmbiguousHttpsSource(
+  parsed: ParsedSource,
+  options: AddOptions,
+  spinner: Spinner,
+  includeInternal: boolean
+): Promise<CloneAndDiscoverResult | null> {
+  try {
+    const result = await cloneAndDiscoverSkills(
+      { ...parsed, type: 'git', url: parsed.url },
+      options,
+      spinner,
+      includeInternal
+    );
+
+    if (result.skills.length > 0 || (options.list && result.discoveredMcps.length > 0)) {
+      return result;
+    }
+
+    spinner.stop(pc.dim('No skills found in cloned repository; trying well-known endpoint...'));
+    await cleanup(result.tempDir);
+    return null;
+  } catch (error) {
+    if (!shouldFallbackToWellKnownAfterCloneError(error)) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    spinner.stop(pc.dim(`Git clone failed; trying well-known endpoint... ${message}`));
+    return null;
+  }
+}
+
 /**
  * Handle skills from a well-known endpoint (RFC 8615).
  * Discovers skills from /.well-known/agent-skills/index.json (preferred)
@@ -395,7 +476,8 @@ async function handleWellKnownSkills(
   source: string,
   url: string,
   options: AddOptions,
-  spinner: ReturnType<typeof p.spinner>
+  spinner: Spinner,
+  previousGitCloneUrl?: string
 ): Promise<void> {
   spinner.start('Discovering skills from well-known endpoint...');
 
@@ -404,11 +486,19 @@ async function handleWellKnownSkills(
 
   if (skills.length === 0) {
     spinner.stop(pc.red('No skills found'));
-    p.outro(
-      pc.red(
-        'No skills found at this URL. Make sure the server has a /.well-known/agent-skills/index.json or /.well-known/skills/index.json file.'
-      )
-    );
+    if (previousGitCloneUrl) {
+      p.outro(
+        pc.red(
+          `No skills found.\n\nTried:\n${getWellKnownAttemptLines(previousGitCloneUrl).join('\n')}`
+        )
+      );
+    } else {
+      p.outro(
+        pc.red(
+          'No skills found at this URL. Make sure the server has a /.well-known/agent-skills/index.json or /.well-known/skills/index.json file.'
+        )
+      );
+    }
     process.exit(1);
   }
 
@@ -933,22 +1023,17 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
 
     spinner.start('Parsing source...');
     const parsed = parseSource(source);
+    let activeParsed = parsed;
     spinner.stop(
       `Source: ${parsed.type === 'local' ? parsed.localPath! : parsed.url}${parsed.ref ? ` @ ${pc.yellow(parsed.ref)}` : ''}${parsed.subpath ? ` (${parsed.subpath})` : ''}${parsed.skillFilter ? ` ${pc.dim('@')}${pc.cyan(parsed.skillFilter)}` : ''}`
     );
 
-    // Handle well-known skills from arbitrary URLs
-    if (parsed.type === 'well-known') {
-      await handleWellKnownSkills(source, parsed.url, options, spinner);
-      return;
-    }
-
     // If skillFilter is present from @skill syntax (e.g., owner/repo@skill-name),
     // merge it into options.skill
-    if (parsed.skillFilter) {
+    if (activeParsed.skillFilter) {
       options.skill = options.skill || [];
-      if (!options.skill.includes(parsed.skillFilter)) {
-        options.skill.push(parsed.skillFilter);
+      if (!options.skill.includes(activeParsed.skillFilter)) {
+        options.skill.push(activeParsed.skillFilter);
       }
     }
 
@@ -960,37 +1045,56 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     let discoveredMcps: DiscoveredMcpServer[] = [];
     let blobResult: BlobInstallResult | null = null;
 
-    if (parsed.type === 'local') {
+    if (parsed.type === 'well-known') {
+      const cloneResult = await tryCloneAmbiguousHttpsSource(
+        parsed,
+        options,
+        spinner,
+        includeInternal
+      );
+
+      if (!cloneResult) {
+        await handleWellKnownSkills(source, parsed.url, options, spinner, parsed.url);
+        return;
+      }
+
+      activeParsed = { ...parsed, type: 'git', url: parsed.url };
+      tempDir = cloneResult.tempDir;
+      skills = cloneResult.skills;
+      discoveredMcps = cloneResult.discoveredMcps;
+    } else if (activeParsed.type === 'local') {
       // Use local path directly, no cloning needed
       spinner.start('Validating local path...');
-      if (!existsSync(parsed.localPath!)) {
+      if (!existsSync(activeParsed.localPath!)) {
         spinner.stop(pc.red('Path not found'));
-        p.outro(pc.red(`Local path does not exist: ${parsed.localPath}`));
+        p.outro(pc.red(`Local path does not exist: ${activeParsed.localPath}`));
         process.exit(1);
       }
       spinner.stop('Local path validated');
 
       spinner.start('Discovering skills...');
-      skills = await discoverSkills(parsed.localPath!, parsed.subpath, {
+      skills = await discoverSkills(activeParsed.localPath!, activeParsed.subpath, {
         includeInternal,
         fullDepth: options.fullDepth,
       });
       discoveredMcps = await discoverMcpServers(
-        parsed.subpath ? join(parsed.localPath!, parsed.subpath) : parsed.localPath!
+        activeParsed.subpath
+          ? join(activeParsed.localPath!, activeParsed.subpath)
+          : activeParsed.localPath!
       );
-    } else if (parsed.type === 'github' && !options.fullDepth && !options.list) {
+    } else if (activeParsed.type === 'github' && !options.fullDepth && !options.list) {
       // Try blob-based fast install for GitHub sources
       // Only enabled for allowlisted orgs; skip for --full-depth
       const BLOB_ALLOWED_OWNERS = ['vercel', 'vercel-labs', 'heygen-com'];
-      const ownerRepo = getOwnerRepo(parsed);
+      const ownerRepo = getOwnerRepo(activeParsed);
       const owner = ownerRepo?.split('/')[0]?.toLowerCase();
       if (ownerRepo && owner && BLOB_ALLOWED_OWNERS.includes(owner)) {
         spinner.start('Fetching skills...');
         const token = getGitHubToken();
         blobResult = await tryBlobInstall(ownerRepo, {
-          subpath: parsed.subpath,
-          skillFilter: parsed.skillFilter,
-          ref: parsed.ref,
+          subpath: activeParsed.subpath,
+          skillFilter: activeParsed.skillFilter,
+          ref: activeParsed.ref,
           token,
           includeInternal,
         });
@@ -1004,37 +1108,27 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         spinner.stop(`Found ${pc.green(skills.length)} skill${skills.length > 1 ? 's' : ''}`);
       } else {
         // Blob failed — fall back to git clone
-        spinner.start('Cloning repository...');
-        tempDir = await cloneRepo(parsed.url, parsed.ref, {
-          onProgress: (message) => spinner.message(`Cloning repository... ${message}`),
-        });
-        spinner.stop('Repository cloned');
-
-        spinner.start('Discovering skills...');
-        skills = await discoverSkills(tempDir, parsed.subpath, {
-          includeInternal,
-          fullDepth: options.fullDepth,
-        });
-        discoveredMcps = await discoverMcpServers(
-          parsed.subpath ? join(tempDir, parsed.subpath) : tempDir
+        const cloneResult = await cloneAndDiscoverSkills(
+          activeParsed,
+          options,
+          spinner,
+          includeInternal
         );
+        tempDir = cloneResult.tempDir;
+        skills = cloneResult.skills;
+        discoveredMcps = cloneResult.discoveredMcps;
       }
     } else {
       // GitLab, git URL, or --full-depth: always clone
-      spinner.start('Cloning repository...');
-      tempDir = await cloneRepo(parsed.url, parsed.ref, {
-        onProgress: (message) => spinner.message(`Cloning repository... ${message}`),
-      });
-      spinner.stop('Repository cloned');
-
-      spinner.start('Discovering skills...');
-      skills = await discoverSkills(tempDir, parsed.subpath, {
-        includeInternal,
-        fullDepth: options.fullDepth,
-      });
-      discoveredMcps = await discoverMcpServers(
-        parsed.subpath ? join(tempDir, parsed.subpath) : tempDir
+      const cloneResult = await cloneAndDiscoverSkills(
+        activeParsed,
+        options,
+        spinner,
+        includeInternal
       );
+      tempDir = cloneResult.tempDir;
+      skills = cloneResult.skills;
+      discoveredMcps = cloneResult.discoveredMcps;
     }
 
     if (skills.length === 0 && (!options.list || discoveredMcps.length === 0)) {
@@ -1541,13 +1635,13 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     }
 
     // Normalize source to owner/repo format
-    const normalizedSource = getOwnerRepo(parsed);
+    const normalizedSource = getOwnerRepo(activeParsed);
 
     // Preserve SSH URLs in lock files instead of normalizing to owner/repo shorthand.
     // When normalizedSource is used, parseSource() later resolves it to HTTPS,
     // breaking restore for private repos that require SSH authentication.
-    const isSSH = parsed.url.startsWith('git@');
-    const lockSource = isSSH ? parsed.url : normalizedSource;
+    const isSSH = activeParsed.url.startsWith('git@');
+    const lockSource = isSSH ? activeParsed.url : normalizedSource;
     const successfulSkillNames = new Set(successful.map((r) => r.skill));
     const now = new Date().toISOString();
     const installMetadataBySkill = new Map<string, InstallMetadata>();
@@ -1557,20 +1651,20 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       if (!successfulSkillNames.has(skillDisplayName)) continue;
 
       const skillPathValue = skillFiles[skill.name];
-      const sourceForMetadata = lockSource || normalizedSource || parsed.url;
-      const canUseUpdateCommand = parsed.type === 'github' && !!skillPathValue;
+      const sourceForMetadata = lockSource || normalizedSource || activeParsed.url;
+      const canUseUpdateCommand = activeParsed.type === 'github' && !!skillPathValue;
       const updateCommand = buildUpdateCommand({
         skillName: skill.name,
         global: installGlobally,
-        sourceInput: parsed.type === 'local' ? parsed.url : source,
+        sourceInput: activeParsed.type === 'local' ? activeParsed.url : source,
         canUseUpdateCommand,
       });
 
       installMetadataBySkill.set(skill.name, {
         source: sourceForMetadata,
-        sourceType: parsed.type,
-        sourceUrl: parsed.url,
-        ref: parsed.ref,
+        sourceType: activeParsed.type,
+        sourceUrl: activeParsed.url,
+        ref: activeParsed.ref,
         skillPath: skillPathValue,
         installedAt: now,
         updatedAt: now,
@@ -1584,9 +1678,9 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       // For GitHub clone installs, fetch the repo tree once and reuse it
       // for all skills — avoids N sequential API calls that take ~400ms each.
       let cachedTree: Awaited<ReturnType<typeof fetchRepoTree>> | undefined;
-      if (parsed.type === 'github' && !blobResult) {
+      if (activeParsed.type === 'github' && !blobResult) {
         const token = getGitHubToken();
-        cachedTree = await fetchRepoTree(normalizedSource, parsed.ref, token);
+        cachedTree = await fetchRepoTree(normalizedSource, activeParsed.ref, token);
       }
 
       for (const skill of selectedSkills) {
@@ -1599,7 +1693,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
             if (blobResult && skillPathValue) {
               const hash = getSkillFolderHashFromTree(blobResult.tree, skillPathValue);
               if (hash) skillFolderHash = hash;
-            } else if (parsed.type === 'github' && skillPathValue && cachedTree) {
+            } else if (activeParsed.type === 'github' && skillPathValue && cachedTree) {
               const hash = getSkillFolderHashFromTree(cachedTree, skillPathValue);
               if (hash) skillFolderHash = hash;
             } else if (skillPathValue && tempDir) {
@@ -1610,9 +1704,9 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
 
             const entry = await addSkillToLock(skill.name, {
               source: lockSource || normalizedSource,
-              sourceType: parsed.type,
-              sourceUrl: parsed.url,
-              ref: parsed.ref,
+              sourceType: activeParsed.type,
+              sourceUrl: activeParsed.url,
+              ref: activeParsed.ref,
               skillPath: skillPathValue,
               skillFolderHash,
               pluginName: skill.pluginName,
@@ -1622,8 +1716,8 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
               buildUpdateCommand({
                 skillName: skill.name,
                 global: installGlobally,
-                sourceInput: parsed.type === 'local' ? parsed.url : source,
-                canUseUpdateCommand: parsed.type === 'github' && !!skillPathValue,
+                sourceInput: activeParsed.type === 'local' ? activeParsed.url : source,
+                canUseUpdateCommand: activeParsed.type === 'github' && !!skillPathValue,
               });
             installMetadataBySkill.set(skill.name, metadataFromLockEntry(entry, updateCommand));
           } catch {
@@ -1648,9 +1742,9 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
             await addSkillToLocalLock(
               skill.name,
               {
-                source: lockSource || parsed.url,
-                ref: parsed.ref,
-                sourceType: parsed.type,
+                source: lockSource || activeParsed.url,
+                ref: activeParsed.ref,
+                sourceType: activeParsed.type,
                 ...(skillPathValue && { skillPath: skillPathValue }),
                 computedHash,
               },

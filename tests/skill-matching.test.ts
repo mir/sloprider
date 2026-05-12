@@ -173,6 +173,40 @@ description: 456
     expect(result).toBeNull();
   });
 
+  it('rejects skill with missing description', async () => {
+    const skillPath = join(testDir, 'missing-description', 'SKILL.md');
+    mkdirSync(join(testDir, 'missing-description'), { recursive: true });
+    writeFileSync(
+      skillPath,
+      `---
+name: missing-description
+---
+
+# Missing Description Skill
+`
+    );
+    const result = await parseSkillMd(skillPath);
+    expect(result).toBeNull();
+  });
+
+  it('falls back to parent folder name when name is missing', async () => {
+    const skillPath = join(testDir, 'daily-briefing', 'SKILL.md');
+    mkdirSync(join(testDir, 'daily-briefing'), { recursive: true });
+    writeFileSync(
+      skillPath,
+      `---
+description: A skill without explicit name
+---
+
+# Daily Briefing
+`
+    );
+    const result = await parseSkillMd(skillPath);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe('daily-briefing');
+    expect(result!.description).toBe('A skill without explicit name');
+  });
+
   it('accepts skill with valid string name and description', async () => {
     const skillPath = join(testDir, 'SKILL.md');
     writeFileSync(
