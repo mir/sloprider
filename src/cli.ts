@@ -34,24 +34,25 @@ ${BOLD}Options:${RESET}
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
-  const inAgent = await isRunningInAgent();
-
-  if (!command) {
-    await runManage({ showLogo: !inAgent });
-    return;
-  }
-
-  if (command === '--help' || command === '-h') {
-    showHelp();
-    return;
-  }
-
-  if (command === '--version' || command === '-v') {
-    console.log(VERSION);
-    return;
-  }
 
   try {
+    const inAgent = await isRunningInAgent();
+
+    if (!command) {
+      await runManage({ showLogo: !inAgent });
+      return;
+    }
+
+    if (command === '--help' || command === '-h') {
+      showHelp();
+      return;
+    }
+
+    if (command === '--version' || command === '-v') {
+      console.log(VERSION);
+      return;
+    }
+
     if (command === 'discover') {
       if (!inAgent) showLogo();
       await runDiscover(args);

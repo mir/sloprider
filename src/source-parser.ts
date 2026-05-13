@@ -133,6 +133,26 @@ const SOURCE_ALIASES: Record<string, string> = {
   'coinbase/agentWallet': 'coinbase/agentic-wallet-skills',
 };
 
+const SUPPORTED_SOURCE_FORMATS = [
+  'https://github.com/owner/repo',
+  'https://github.com/owner/repo/tree/main/path',
+  'https://github.com/owner/repo/blob/main/path/file',
+  'https://gitlab.example.com/group/repo',
+  'https://gitlab.example.com/group/repo/-/tree/main/path',
+  'https://gitlab.example.com/group/repo/-/blob/main/path/file',
+  'git@github.com:owner/repo.git',
+  'gitlab.example.com/group/repo',
+  'owner/repo',
+];
+
+function sourceFormatHelp(input: string): string {
+  return [
+    `Unsupported git repository source: ${input}`,
+    'Provide a git repository link in one of these formats:',
+    ...SUPPORTED_SOURCE_FORMATS.map((format) => `  - ${format}`),
+  ].join('\n');
+}
+
 interface FragmentRefResult {
   inputWithoutFragment: string;
   ref?: string;
@@ -267,6 +287,18 @@ function parseGitHubHttpSource(
     };
   }
 
+  if (parts[2] === 'blob' && parts[3]) {
+    const filePath = parts.slice(4).join('/');
+    const subpath = containingDirectory(filePath);
+    return {
+      type: 'github',
+      url: base.url,
+      ref: parts[3],
+      ...(subpath ? { subpath: sanitizeSubpath(subpath) } : {}),
+      ...(fragmentSkillFilter ? { skillFilter: fragmentSkillFilter } : {}),
+    };
+  }
+
   return base;
 }
 
@@ -274,19 +306,30 @@ function gitLabRepoUrl(parsed: URL, repoPath: string): string {
   return `${parsed.protocol}//${parsed.host}/${repoPath.replace(/\.git$/, '')}.git`;
 }
 
-function parseGitLabTreeSource(input: string, fragmentRef?: string): ParsedSource | null {
+function containingDirectory(filePath: string): string | undefined {
+  if (!filePath) return undefined;
+  const parts = filePath.split('/').filter(Boolean);
+  if (parts.length <= 1) return undefined;
+  return parts.slice(0, -1).join('/');
+}
+
+function parseGitLabRefPathSource(input: string, fragmentRef?: string): ParsedSource | null {
   const parsed = parseUrl(input);
   if (!parsed || parsed.hostname === 'github.com') return null;
 
   const parts = rawPathParts(input);
-  const markerIndex = parts.findIndex((part, index) => part === '-' && parts[index + 1] === 'tree');
+  const markerIndex = parts.findIndex(
+    (part, index) => part === '-' && ['tree', 'blob'].includes(parts[index + 1] ?? '')
+  );
   if (markerIndex < 2) return null;
 
+  const mode = parts[markerIndex + 1];
   const ref = parts[markerIndex + 2];
-  if (!ref) return null;
+  if (!mode || !ref) return null;
 
   const repoPath = parts.slice(0, markerIndex).join('/');
-  const subpath = parts.slice(markerIndex + 3).join('/');
+  const refPath = parts.slice(markerIndex + 3).join('/');
+  const subpath = mode === 'blob' ? containingDirectory(refPath) : refPath;
   return {
     type: 'gitlab',
     url: gitLabRepoUrl(parsed, repoPath),
@@ -321,7 +364,7 @@ function parseExplicitGitUrl(input: string, ref?: string): ParsedSource | null {
 }
 
 function unsupportedSource(input: string): never {
-  throw new Error(`Unsupported source format: ${input}`);
+  throw new Error(sourceFormatHelp(input));
 }
 
 function parseGitHubShorthand(
@@ -451,8 +494,8 @@ export function parseSource(input: string): ParsedSource {
   const githubSource = parseGitHubHttpSource(input, fragmentRef, fragmentSkillFilter);
   if (githubSource) return githubSource;
 
-  const gitlabTreeSource = parseGitLabTreeSource(input, fragmentRef);
-  if (gitlabTreeSource) return gitlabTreeSource;
+  const gitlabRefPathSource = parseGitLabRefPathSource(input, fragmentRef);
+  if (gitlabRefPathSource) return gitlabRefPathSource;
 
   // GitLab URL: https://gitlab.example.com/owner/repo or
   // https://gitlab.com/group/subgroup/repo

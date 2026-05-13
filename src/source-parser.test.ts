@@ -57,6 +57,18 @@ describe('source-parser', () => {
       });
     });
 
+    it('parses GitLab blob URLs as the containing directory', () => {
+      const result = parseSource(
+        'https://gitlab.semrush.net/ai/agent-marketplace/-/blob/master/plugins/codex/.mcp.json?ref_type=heads'
+      );
+      expect(result).toEqual({
+        type: 'gitlab',
+        url: 'https://gitlab.semrush.net/ai/agent-marketplace.git',
+        ref: 'master',
+        subpath: 'plugins/codex',
+      });
+    });
+
     it('parses gitlab tree with branch but no path', () => {
       const result = parseSource('https://gitlab.example.com/org/repo/-/tree/v1.0');
       expect(result).toEqual({
@@ -103,10 +115,12 @@ describe('source-parser', () => {
 
     it('rejects unsupported generic URLs', () => {
       expect(() => parseSource('https://google.com/search/result')).toThrow(
-        'Unsupported source format'
+        'Unsupported git repository source'
       );
-      expect(() => parseSource('https://mintlify.com/docs')).toThrow('Unsupported source format');
-      expect(() => parseSource('mintlify.com/docs')).toThrow('Unsupported source format');
+      expect(() => parseSource('https://mintlify.com/docs')).toThrow(
+        'Provide a git repository link'
+      );
+      expect(() => parseSource('mintlify.com/docs')).toThrow('Provide a git repository link');
     });
 
     it('retains official gitlab.com parsing for convenience', () => {
@@ -169,6 +183,17 @@ describe('source-parser', () => {
       expect(result).toEqual({
         type: 'github',
         url: 'https://github.com/owner/repo.git',
+        ref: 'main',
+      });
+    });
+
+    it('parses GitHub blob URLs as the containing directory', () => {
+      const result = parseSource('https://github.com/owner/repo/blob/main/plugins/codex/.mcp.json');
+      expect(result).toEqual({
+        type: 'github',
+        url: 'https://github.com/owner/repo.git',
+        ref: 'main',
+        subpath: 'plugins/codex',
       });
     });
 

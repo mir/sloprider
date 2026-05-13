@@ -46,8 +46,9 @@ agentart discover git@github.com:vercel-labs/agent-skills.git
 agentart discover vercel-labs/agent-skills
 ```
 
-Accepted source formats are GitHub URLs, GitLab URLs, SSH git URLs, scheme-less GitHub/GitLab host URLs, and GitHub
-shorthand (`owner/repo`). Local paths and arbitrary web URLs are not accepted by `discover`.
+Accepted source formats are GitHub URLs, GitLab URLs, Git hosting `tree` and `blob` links, SSH git URLs, scheme-less
+GitHub/GitLab host URLs, and GitHub shorthand (`owner/repo`). Local paths and arbitrary web URLs are not accepted by
+`discover`.
 
 ### `agentart install <git-url>`
 
