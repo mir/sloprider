@@ -39,7 +39,8 @@ describe('parseSource', () => {
       const result = parseSource('https://github.com/owner/repo/blob/main/README.md#L10');
       expect(result.type).toBe('github');
       expect(result.url).toBe('https://github.com/owner/repo.git');
-      expect(result.ref).toBeUndefined();
+      expect(result.ref).toBe('main');
+      expect(result.subpath).toBeUndefined();
     });
 
     it('GitHub URL - tree with branch only', () => {
@@ -56,6 +57,14 @@ describe('parseSource', () => {
       expect(result.url).toBe('https://github.com/owner/repo.git');
       expect(result.ref).toBe('main');
       expect(result.subpath).toBe('skills/my-skill');
+    });
+
+    it('GitHub URL - blob file with path', () => {
+      const result = parseSource('https://github.com/owner/repo/blob/main/plugins/codex/.mcp.json');
+      expect(result.type).toBe('github');
+      expect(result.url).toBe('https://github.com/owner/repo.git');
+      expect(result.ref).toBe('main');
+      expect(result.subpath).toBe('plugins/codex');
     });
 
     // Note: Branch names with slashes (e.g., feature/my-feature) are ambiguous.
@@ -92,6 +101,24 @@ describe('parseSource', () => {
       expect(result.url).toBe('https://gitlab.com/owner/repo.git');
       expect(result.ref).toBe('main');
       expect(result.subpath).toBe('src/skills');
+    });
+
+    it('GitLab URL - blob file with query string', () => {
+      const result = parseSource(
+        'https://gitlab.semrush.net/ai/agent-marketplace/-/blob/master/plugins/codex/.mcp.json?ref_type=heads'
+      );
+      expect(result.type).toBe('gitlab');
+      expect(result.url).toBe('https://gitlab.semrush.net/ai/agent-marketplace.git');
+      expect(result.ref).toBe('master');
+      expect(result.subpath).toBe('plugins/codex');
+    });
+
+    it('GitLab URL - blob file at repo root', () => {
+      const result = parseSource('https://gitlab.com/owner/repo/-/blob/main/.mcp.json');
+      expect(result.type).toBe('gitlab');
+      expect(result.url).toBe('https://gitlab.com/owner/repo.git');
+      expect(result.ref).toBe('main');
+      expect(result.subpath).toBeUndefined();
     });
 
     it('GitLab URL - with .git suffix', () => {
@@ -539,10 +566,12 @@ describe('Prefix shorthand tests', () => {
 
 describe('Unsupported sources', () => {
   it('rejects arbitrary web URLs', () => {
-    expect(() => parseSource('https://mintlify.com/docs')).toThrow('Unsupported source format');
+    expect(() => parseSource('https://mintlify.com/docs')).toThrow(
+      'Unsupported git repository source'
+    );
   });
 
   it('rejects scheme-less arbitrary web URLs', () => {
-    expect(() => parseSource('mintlify.com/docs')).toThrow('Unsupported source format');
+    expect(() => parseSource('mintlify.com/docs')).toThrow('Provide a git repository link');
   });
 });

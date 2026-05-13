@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { hasLogo, runCliOutput } from './test-utils.ts';
+import { hasLogo, runCli, runCliOutput } from './test-utils.ts';
 
 describe('agentart CLI', () => {
   it('prints R2 help', () => {
@@ -39,5 +39,17 @@ describe('agentart CLI', () => {
     for (const command of ['add', 'mcp', 'update', 'check', 'ls', 'rm']) {
       expect(runCliOutput([command])).toContain(`Unknown command: ${command}`);
     }
+  });
+
+  it('prints friendly unsupported source errors without a Bun stack trace', () => {
+    const result = runCli(['discover', 'https://mintlify.com/docs']);
+    const output = result.stdout + result.stderr;
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('Unsupported git repository source: https://mintlify.com/docs');
+    expect(output).toContain('Provide a git repository link in one of these formats:');
+    expect(output).toContain('https://gitlab.example.com/group/repo/-/blob/main/path/file');
+    expect(output).not.toContain('at unsupportedSource');
+    expect(output).not.toContain('Bun v');
   });
 });
