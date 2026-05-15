@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
+import { delimiter, join } from 'path';
 import { tmpdir } from 'os';
 import { parseListOptions } from './list.ts';
 import { runCli } from './test-utils.ts';
@@ -112,7 +121,144 @@ description: A test skill
     expect(result.stdout).toContain('codex-hooks');
     expect(result.stdout).toContain('SessionStart, Stop');
   });
+
+  it('lists Claude Code plugins installed through Claude', () => {
+    const homeDir = join(testDir, 'home');
+    const badBinDir = join(testDir, 'bad-bin');
+    const binDir = join(testDir, 'bin');
+    mkdirSync(badBinDir, { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    writeClaudeShim(
+      badBinDir,
+      `#!/bin/sh
+echo "error: unknown command 'list'" >&2
+exit 1
+`,
+      `@echo off
+echo error: unknown command 'list' 1>&2
+exit /b 1
+`
+    );
+    writeClaudeShim(
+      binDir,
+      `#!/bin/sh
+if [ "$1 $2 $3" = "plugin list --json" ]; then
+  printf '%s\\n' '[{"id":"context7@claude-plugins-official","version":"unknown","scope":"user","enabled":true,"installPath":"/tmp/context7"},{"id":"project-plugin@demo","version":"1.0.0","scope":"project","enabled":true,"installPath":"/tmp/project-plugin"}]'
+  exit 0
+fi
+exit 1
+`,
+      `@echo off
+if "%1 %2 %3"=="plugin list --json" (
+  echo [{"id":"context7@claude-plugins-official","version":"unknown","scope":"user","enabled":true,"installPath":"/tmp/context7"},{"id":"project-plugin@demo","version":"1.0.0","scope":"project","enabled":true,"installPath":"/tmp/project-plugin"}]
+  exit /b 0
+)
+exit /b 1
+`
+    );
+
+    const result = runCli(['list'], testDir, {
+      ...testHomeEnv(homeDir),
+      PATH: [badBinDir, binDir, process.env.PATH ?? ''].filter(Boolean).join(delimiter),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Project');
+    expect(result.stdout).toContain('Global');
+    expect(result.stdout).toContain('Claude Code');
+    expect(result.stdout).toContain('Plugins');
+    expect(result.stdout).toContain('context7@claude-plugins-official');
+    expect(result.stdout).toContain('/tmp/context7');
+    expect(result.stdout).toContain('project-plugin@demo');
+    expect(result.stdout).toContain('/tmp/project-plugin');
+
+    const globalRegistry = JSON.parse(
+      readFileSync(join(homeDir, '.local', 'state', 'sloprider', '.plugins.json'), 'utf-8')
+    );
+    expect(globalRegistry.plugins['context7@claude-plugins-official']).toMatchObject({
+      name: 'context7@claude-plugins-official',
+      agents: ['claude-code'],
+      scope: 'global',
+      sourceType: 'claude-plugin',
+      pluginPath: '/tmp/context7',
+    });
+
+    const projectRegistry = JSON.parse(
+      readFileSync(join(testDir, 'sloprider-plugins.json'), 'utf-8')
+    );
+    expect(projectRegistry.plugins['project-plugin@demo']).toMatchObject({
+      name: 'project-plugin@demo',
+      agents: ['claude-code'],
+      scope: 'project',
+      sourceType: 'claude-plugin',
+      pluginPath: '/tmp/project-plugin',
+    });
+  });
+
+  it('does not duplicate Claude marketplace plugins already managed by sloprider', () => {
+    const homeDir = join(testDir, 'home');
+    const binDir = join(testDir, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(testDir, 'sloprider-plugins.json'),
+      JSON.stringify({
+        version: 1,
+        plugins: {
+          'hide-secrets': {
+            name: 'hide-secrets',
+            agents: ['claude-code'],
+            scope: 'project',
+            source: 'owner/repo',
+            sourceType: 'github',
+            pluginPath: 'plugins/redactor',
+            marketplaceName: 'agent-marketplace',
+            marketplacePath: '.claude-plugin/marketplace.json',
+            targetPath: 'plugins/redactor',
+            pluginSource: {
+              source: 'git-subdir',
+              url: 'https://example.com/repo.git',
+              path: './plugins/redactor',
+            },
+            installedAt: '2026-05-12T00:00:00.000Z',
+            updatedAt: '2026-05-12T00:00:00.000Z',
+          },
+        },
+      })
+    );
+    writeClaudeShim(
+      binDir,
+      `#!/bin/sh
+if [ "$1 $2 $3" = "plugin list --json" ]; then
+  printf '%s\\n' '[{"id":"hide-secrets@agent-marketplace","version":"1.0.0","scope":"project","enabled":true,"installPath":"/tmp/hide-secrets"}]'
+  exit 0
+fi
+exit 1
+`,
+      `@echo off
+if "%1 %2 %3"=="plugin list --json" (
+  echo [{"id":"hide-secrets@agent-marketplace","version":"1.0.0","scope":"project","enabled":true,"installPath":"/tmp/hide-secrets"}]
+  exit /b 0
+)
+exit /b 1
+`
+    );
+
+    const result = runCli(['list'], testDir, {
+      ...testHomeEnv(homeDir),
+      PATH: [binDir, process.env.PATH ?? ''].filter(Boolean).join(delimiter),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('hide-secrets');
+    expect(result.stdout).not.toContain('hide-secrets@agent-marketplace');
+    expect(result.stdout.match(/hide-secrets/g)).toHaveLength(1);
+  });
 });
+
+function writeClaudeShim(binDir: string, shellScript: string, cmdScript: string): void {
+  writeFileSync(join(binDir, 'claude'), shellScript);
+  chmodSync(join(binDir, 'claude'), 0o755);
+  writeFileSync(join(binDir, 'claude.cmd'), cmdScript.replace(/\n/g, '\r\n'));
+}
 
 function testHomeEnv(homeDir: string): Record<string, string> {
   return {
